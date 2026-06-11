@@ -3,6 +3,8 @@ import { ref } from 'vue'
 import { apiService } from '@/services/api'
 import { Eye, EyeOff } from 'lucide-vue-next'
 
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+
 const emit = defineEmits(['user-created'])
 const showPassword = ref(false)
 
@@ -22,10 +24,13 @@ const expertiseInput = ref('')
 const addTag = (event) => {
   if (event.key === 'Enter' || event.key === ',') {
     event.preventDefault()
+
     const val = expertiseInput.value.trim().replace(/,$/, '')
+
     if (val && !expertiseTags.value.includes(val)) {
       expertiseTags.value.push(val)
     }
+
     expertiseInput.value = ''
   }
 }
@@ -40,6 +45,7 @@ const uploadError = ref('')
 
 const handleFileUpload = async (event) => {
   const file = event.target.files[0]
+
   if (!file) return
 
   uploadError.value = ''
@@ -55,7 +61,7 @@ const handleFileUpload = async (event) => {
     const formData = new FormData()
     formData.append('image', file)
 
-    const response = await fetch(, {
+    const response = await fetch(`${API_BASE_URL}/api/assistant/extract-user-profile`, {
       method: 'POST',
       body: formData,
     })
@@ -67,6 +73,11 @@ const handleFileUpload = async (event) => {
       if (result.data.email) form.value.email = result.data.email
       if (result.data.affiliation) form.value.affiliation = result.data.affiliation
       if (result.data.coOrgName) form.value.coOrgName = result.data.coOrgName
+
+      if (result.data.phoneNumber) {
+        form.value.phoneNumber = result.data.phoneNumber
+      }
+
       if (result.data.expertise && Array.isArray(result.data.expertise)) {
         result.data.expertise.forEach((tag) => {
           if (tag && !expertiseTags.value.includes(tag)) {
@@ -82,7 +93,7 @@ const handleFileUpload = async (event) => {
     uploadError.value = 'An error occurred while uploading.'
   } finally {
     isUploading.value = false
-    event.target.value = '' // reset input
+    event.target.value = ''
   }
 }
 
@@ -94,6 +105,7 @@ const submitForm = async () => {
 
   try {
     isSubmitting.value = true
+
     const expertiseString = expertiseTags.value.join(', ')
 
     await apiService.createUser({
@@ -108,7 +120,6 @@ const submitForm = async () => {
 
     alert('User successfully created!')
 
-    // Reset form
     form.value = {
       fullName: '',
       email: '',
@@ -117,7 +128,9 @@ const submitForm = async () => {
       coOrgName: '',
       affiliation: '',
     }
+
     expertiseTags.value = []
+    expertiseInput.value = ''
 
     emit('user-created')
   } catch (error) {
@@ -153,6 +166,7 @@ const submitForm = async () => {
             d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
           />
         </svg>
+
         <span class="text-sm font-semibold text-gray-700">Auto-fill from Profile Image (AI)</span>
         <span class="text-xs text-gray-500 mt-1">PNG, JPG up to 10MB</span>
       </div>
@@ -203,9 +217,9 @@ const submitForm = async () => {
           placeholder="e.g. john@utm.my"
           class="border border-gray-300 p-3 rounded focus:outline-none focus:border-[#5c001f]"
         />
-        <span class="text-sm text-gray-500 italic"
-          >Note: Use @utm.my email for automatic Staff privileges</span
-        >
+        <span class="text-sm text-gray-500 italic">
+          Note: Use @utm.my email for automatic Staff privileges
+        </span>
       </div>
 
       <!-- Password -->
@@ -236,7 +250,7 @@ const submitForm = async () => {
         <input
           v-model="form.phoneNumber"
           type="tel"
-          maxlength="12"
+          maxlength="20"
           placeholder="e.g. 0123456789"
           class="border border-gray-300 p-3 rounded focus:outline-none focus:border-[#5c001f]"
         />
@@ -264,7 +278,7 @@ const submitForm = async () => {
         />
       </div>
 
-      <!-- Expertise (Tags) -->
+      <!-- Expertise Tags -->
       <div class="flex flex-col gap-2">
         <label class="font-semibold text-gray-800">Area of Expertise</label>
         <div
@@ -284,6 +298,7 @@ const submitForm = async () => {
               &times;
             </button>
           </div>
+
           <input
             v-model="expertiseInput"
             @keydown="addTag"
