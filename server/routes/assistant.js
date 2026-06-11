@@ -40,7 +40,8 @@ I-FAMOUS system knowledge:
 - Staff/Lecturer users usually use @utm.my email.
 - Normal external users may appear as outsiders.
 - Student creation may require import or separate student data because the basic user form is mainly for staff/outsiders.
-- The AI assistant uses local Ollama. If Ollama is not installed, not running, or the model name is wrong, AI features may be unavailable.
+- The AI assistant uses local Ollama for local development or Groq Cloud AI for online deployment.
+- If AI is unavailable, the cloud/local AI configuration may be missing or incorrect.
 
 IMPORTANT:
 Only output action JSON if the user clearly and explicitly asks you to perform that action.
@@ -418,7 +419,50 @@ function verifyCoordinator(req, callback) {
     }
 }
 
+/*
+|--------------------------------------------------------------------------
+| AI Provider Function
+|--------------------------------------------------------------------------
+| DO NOT put your Groq API key here.
+|
+| Put it in Render Environment Variables:
+| GROQ_API_KEY=your_real_key
+| GROQ_CHAT_MODEL=llama-3.1-8b-instant
+| GROQ_VISION_MODEL=llama-3.1-8b-instant
+|
+| For local testing, you may put the same variables in server/.env.
+| server/.env is ignored by Git, so it will not be uploaded to GitHub.
+|--------------------------------------------------------------------------
+*/
 async function runOllama(messages, mode = 'chat') {
+    // Cloud AI for Render deployment using Groq
+    if (process.env.GROQ_API_KEY) {
+        const selectedModel =
+            mode === 'vision'
+                ? process.env.GROQ_VISION_MODEL || process.env.GROQ_CHAT_MODEL || 'llama-3.1-8b-instant'
+                : process.env.GROQ_CHAT_MODEL || 'llama-3.1-8b-instant';
+
+        const groqPayload = {
+            model: selectedModel,
+            messages,
+            temperature: 0.3,
+        };
+
+        const groqResponse = await axios.post(
+            'https://api.groq.com/openai/v1/chat/completions',
+            groqPayload,
+            {
+                headers: {
+                    Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+                    'Content-Type': 'application/json',
+                },
+            }
+        );
+
+        return groqResponse.data.choices[0].message.content;
+    }
+
+    // Local fallback for laptop development using Ollama
     const selectedModel =
         mode === 'vision'
             ? process.env.OLLAMA_VISION_MODEL || 'moondream'
