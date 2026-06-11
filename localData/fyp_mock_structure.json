@@ -1,0 +1,100 @@
+[
+    {
+        "project_id": 101,
+        "fyp_session_id": 25262,
+        "fyp_title": "AI-Driven Timetable Optimizer",
+        "student": {
+            "user_id": 4001,
+            "class_id": 5,
+            "full_name": "Ali bin Abu"
+        },
+        "supervisor": {
+            "user_id": 4020,
+            "full_name": "Dr. Neo",
+            "email": "dr.neo@utm.my"
+        },
+        "examiners": [
+            {
+                "user_id": 4017,
+                "role": "First Examiner",
+                "full_name": "Prof. Smith",
+                "email": "prof.smith@utm.my"
+            },
+            {
+                "user_id": 4018,
+                "role": "Second Examiner",
+                "full_name": "Dr. Tariq",
+                "email": "dr.tariq@utm.my"
+            }
+        ]
+    },
+    {
+        "project_id": 102,
+        "fyp_session_id": 25262,
+        "fyp_title": "IoT Smart Agriculture System",
+        "student": {
+            "user_id": 4003,
+            "class_id": 5,
+            "full_name": "Siti Nurhaliza"
+        },
+        "supervisor": {
+            "user_id": 4020,
+            "full_name": "Dr. Sarah",
+            "email": "dr.sarah@utm.my"
+        },
+        "examiners": [
+            {
+                "user_id": 4018,
+                "role": "First Examiner",
+                "full_name": "Assoc. Prof. Lee",
+                "email": "prof.lee@utm.my"
+            }
+        ]
+    },
+    {
+        "project_id": 103,
+        "fyp_session_id": 25262,
+        "fyp_title": "Autonomous Drone Path Planning using Deep Q-Learning",
+        "student": {
+            "user_id": 4004,
+            "class_id": 5,
+            "full_name": "Mei Ling"
+        },
+        "supervisor": {
+            "user_id": 4016,
+            "full_name": "Dr. Sarah",
+            "email": "dr.sarah@utm.my"
+        },
+        "examiners": [
+            {
+                "user_id": 4018,
+                "role": "First Examiner",
+                "full_name": "Assoc. Prof. Lee",
+                "email": "prof.lee@utm.my"
+            }
+        ]
+    },
+    {
+        "project_id": 104,
+        "fyp_session_id": 25262,
+        "fyp_title": "Blockchain-based Academic Credentials Verification",
+        "student": {
+            "user_id": 4003,
+            "class_id": 5,
+            "full_name": "Siti Nurhaliza"
+        },
+        "supervisor": {
+            "user_id": 4016,
+            "full_name": "Dr. Sarah",
+            "email": "dr.sarah@utm.my"
+        },
+        "examiners": [
+            {
+                "user_id": 4020,
+                "role": "First Examiner",
+                "full_name": "Assoc. Prof. Lee",
+                "email": "prof.lee@utm.my"
+            }
+        ]
+    }
+]

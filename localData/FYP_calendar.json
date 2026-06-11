@@ -1,0 +1,142 @@
+[
+  {
+    "project_id": 101,
+    "fyp_session_id": 25262,
+    "project_title": "AI-Driven Timetable Optimizer",
+    "student": {
+      "student_id": 4003,
+      "name": "Julkar Nahin",
+      "metric_number": "A24MJ4003",
+      "email": "julkar@graduate.utm.my"
+    },
+    "supervisor": {
+      "supervisor_id": 501,
+      "name": "Dr. Neo",
+      "email": "dr.neo@utm.my"
+    },
+    "examiners": [
+      {
+        "examiner_id": 801,
+        "name": "Prof. Smith",
+        "email": "prof.smith@utm.my"
+      },
+      {
+        "examiner_id": 802,
+        "name": "Dr. Tariq",
+        "email": "dr.tariq@utm.my"
+      }
+    ]
+  },
+  {
+    "project_id": 102,
+    "fyp_session_id": 25262,
+    "project_title": "IoT Smart Agriculture System",
+    "student": {
+      "student_id": 4004,
+      "name": "Ahmad Fauzi",
+      "metric_number": "A24MJ4004",
+      "email": "ahmad.fauzi@graduate.utm.my"
+    },
+    "supervisor": {
+      "supervisor_id": 502,
+      "name": "Dr. Zainab",
+      "email": "dr.zainab@utm.my"
+    },
+    "examiners": [
+      {
+        "examiner_id": 803,
+        "name": "Dr. Haris",
+        "email": "dr.haris@utm.my"
+      },
+      {
+        "examiner_id": 804,
+        "name": "Prof. Aminah",
+        "email": "prof.aminah@utm.my"
+      }
+    ]
+  },
+  {
+    "project_id": 103,
+    "fyp_session_id": 25262,
+    "project_title": "Blockchain-Based Document Verification",
+    "student": {
+      "student_id": 4005,
+      "name": "Siti Sarah",
+      "metric_number": "A24MJ4005",
+      "email": "siti.sarah@graduate.utm.my"
+    },
+    "supervisor": {
+      "supervisor_id": 503,
+      "name": "Dr. Abu",
+      "email": "dr.abu@utm.my"
+    },
+    "examiners": [
+      {
+        "examiner_id": 801,
+        "name": "Prof. Smith",
+        "email": "prof.smith@utm.my"
+      },
+      {
+        "examiner_id": 805,
+        "name": "Dr. Yahya",
+        "email": "dr.yahya@utm.my"
+      }
+    ]
+  },
+  {
+    "project_id": 104,
+    "fyp_session_id": 25262,
+    "project_title": "Deep Learning for Medical Image Classification",
+    "student": {
+      "student_id": 4006,
+      "name": "Lim Wei Kang",
+      "metric_number": "A24MJ4006",
+      "email": "weikang.lim@graduate.utm.my"
+    },
+    "supervisor": {
+      "supervisor_id": 504,
+      "name": "Prof. Roslan",
+      "email": "prof.roslan@utm.my"
+    },
+    "examiners": [
+      {
+        "examiner_id": 802,
+        "name": "Dr. Tariq",
+        "email": "dr.tariq@utm.my"
+      },
+      {
+        "examiner_id": 806,
+        "name": "Dr. Nor",
+        "email": "dr.nor@utm.my"
+      }
+    ]
+  },
+  {
+    "project_id": 105,
+    "fyp_session_id": 25262,
+    "project_title": "Autonomous Indoor Navigation Drone",
+    "student": {
+      "student_id": 4007,
+      "name": "Kavitha Rengasamy",
+      "metric_number": "A24MJ4007",
+      "email": "kavitha.r@graduate.utm.my"
+    },
+    "supervisor": {
+      "supervisor_id": 505,
+      "name": "Dr. Lim",
+      "email": "dr.lim@utm.my"
+    },
+    "examiners": [
+      {
+        "examiner_id": 803,
+        "name": "Dr. Haris",
+        "email": "dr.haris@utm.my"
+      },
+      {
+        "examiner_id": 807,
+        "name": "Prof. Ibrahim",
+        "email": "prof.ibrahim@utm.my"
+      }
+    ]
+  }
+]

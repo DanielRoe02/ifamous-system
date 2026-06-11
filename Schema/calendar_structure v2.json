@@ -1,0 +1,77 @@
+{
+    "specific_events": [],
+    "weekly_recurring": [
+        {
+            "slots": [
+                {
+                    "label": "SECJ3553-01 (L) | N28-BK2",
+                    "end_time": "08:50",
+                    "start_time": "08:00",
+                    "is_blocking": true
+                },
+                {
+                    "label": "SECJ3553-01 (L) | N28-MPKT1",
+                    "end_time": "10:50",
+                    "start_time": "09:00",
+                    "is_blocking": true
+                },
+                {
+                    "label": "SECJ3104-01 (L) | N28-BK2",
+                    "end_time": "12:50",
+                    "start_time": "11:00",
+                    "is_blocking": true
+                },
+                {
+                    "label": "SECJ3104-01 (L) | N28-MPKT1",
+                    "end_time": "16:50",
+                    "start_time": "14:00",
+                    "is_blocking": true
+                }
+            ],
+            "day_name": "Monday",
+            "day_of_week": 1
+        },
+        {
+            "slots": [
+                {
+                    "label": "SECJ3553-01 (L) | N28-MPKT2",
+                    "end_time": "16:50",
+                    "start_time": "14:00",
+                    "is_blocking": true
+                }
+            ],
+            "day_name": "Tuesday",
+            "day_of_week": 2
+        },
+        {
+            "slots": [
+                {
+                    "label": "SECH3143-01 (L) | N28-MPKT2",
+                    "end_time": "10:50",
+                    "start_time": "08:00",
+                    "is_blocking": true
+                }
+            ],
+            "day_name": "Wednesday",
+            "day_of_week": 3
+        },
+        {
+            "slots": [
+                {
+                    "label": "UKQF2102-06 (L) | U-BK2",
+                    "end_time": "09:50",
+                    "start_time": "08:00",
+                    "is_blocking": true
+                },
+                {
+                    "label": "SECJ3623-01 (L) | N28-MPKT2",
+                    "end_time": "16:50",
+                    "start_time": "14:00",
+                    "is_blocking": true
+                }
+            ],
+            "day_name": "Thursday",
+            "day_of_week": 4
+        }
+    ]
+}

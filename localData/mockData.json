@@ -1,0 +1,157 @@
+{
+  "users": [
+    {
+      "user_id": 1,
+      "email": "ali.b@graduate.utm.my",
+      "password_hash": "e10adc3949ba59abbe56e057f20f883e",
+      "full_name": "Ali Bin Abu",
+      "phone_number": "0123456789",
+      "date_created": "2026-05-01",
+      "last_date_login": "2026-05-06",
+      "is_utm_staff": 0,
+      "affiliation": null
+    },
+    {
+      "user_id": 2,
+      "email": "siti.a@graduate.utm.my",
+      "password_hash": "e10adc3949ba59abbe56e057f20f883e",
+      "full_name": "Siti Aminah",
+      "phone_number": "0198765432",
+      "date_created": "2026-05-01",
+      "last_date_login": "2026-05-05",
+      "is_utm_staff": 0,
+      "affiliation": null
+    },
+    {
+      "user_id": 3,
+      "email": "dr.ahmad@utm.my",
+      "password_hash": "e10adc3949ba59abbe56e057f20f883e",
+      "full_name": "Dr. Ahmad",
+      "phone_number": "0122223333",
+      "date_created": "2025-01-10",
+      "last_date_login": "2026-05-06",
+      "is_utm_staff": 1,
+      "affiliation": "UTM"
+    },
+    {
+      "user_id": 4,
+      "email": "dr.zainab@utm.my",
+      "password_hash": "e10adc3949ba59abbe56e057f20f883e",
+      "full_name": "Dr. Zainab",
+      "phone_number": "0133334444",
+      "date_created": "2024-06-15",
+      "last_date_login": "2026-05-04",
+      "is_utm_staff": 1,
+      "affiliation": "UTM"
+    },
+    {
+      "user_id": 5,
+      "email": "john.doe@gmail.com",
+      "password_hash": "e10adc3949ba59abbe56e057f20f883e",
+      "full_name": "John Doe",
+      "phone_number": "0144445555",
+      "date_created": "2026-05-02",
+      "last_date_login": "2026-05-06",
+      "is_utm_staff": 0,
+      "affiliation": "Tech Innovators Inc."
+    }
+  ],
+  "students": [
+    {
+      "student_id": 1,
+      "metric_number": "A24MJ4003",
+      "CGPA": 3.75,
+      "GPA": 3.80,
+      "proof_of_credit_hours": "/proofs/ali_credits.pdf",
+      "credit_hours_completed": 105.0
+    },
+    {
+      "student_id": 2,
+      "metric_number": "A24MJ4004",
+      "CGPA": 3.20,
+      "GPA": 3.50,
+      "proof_of_credit_hours": "/proofs/siti_credits.pdf",
+      "credit_hours_completed": 98.0
+    }
+  ],
+  "supervisor": [
+    {
+      "supervisor_id": 3,
+      "research_expertise": "Artificial Intelligence & Machine Learning",
+      "sv_capacity": 5,
+      "current_capacity": 2
+    }
+  ],
+  "examiners": [
+    {
+      "examiners_id": 4,
+      "industry_background": "Software Engineering & Architecture"
+    },
+    {
+      "examiners_id": 5,
+      "industry_background": "Cybersecurity & Data Privacy"
+    }
+  ],
+  "fyp_session": [
+    {
+      "fyp_session_id": 20261
+    }
+  ],
+  "projects": [
+    {
+      "project_id": 1,
+      "title": "AI-Powered Course Recommender",
+      "description": "An intelligent app to recommend courses based on student past grades and interests.",
+      "status": "Active",
+      "github_link": "https://github.com/ali-b/ai-course-recommender",
+      "drive_link": "https://drive.google.com/drive/folders/ali-b-project",
+      "parent_project_id": null,
+      "supervisor_id": 3,
+      "student_id": 1,
+      "fyp_session_id": 20261,
+      "project_type": "Research"
+    },
+    {
+      "project_id": 2,
+      "title": "Smart Campus Navigation System",
+      "description": "A mobile-responsive web app to help students navigate the UTM campus efficiently.",
+      "status": "Proposal Pending",
+      "github_link": null,
+      "drive_link": null,
+      "parent_project_id": null,
+      "supervisor_id": 3,
+      "student_id": 2,
+      "fyp_session_id": 20261,
+      "project_type": "Development"
+    }
+  ],
+  "projects_submissions": [
+    {
+      "submission_id": 1,
+      "submission_title": "Project Proposal Draft 1",
+      "file_path": "/submissions/ali_proposal_v1.pdf",
+      "submitted_at": "2026-05-02",
+      "submission_type": "proposal",
+      "status": "approved",
+      "project_id": 1
+    },
+    {
+      "submission_id": 2,
+      "submission_title": "Week 1 Logbook",
+      "file_path": "/submissions/ali_logbook_w1.pdf",
+      "submitted_at": "2026-05-06",
+      "submission_type": "logbook",
+      "status": "pending",
+      "project_id": 1
+    },
+    {
+      "submission_id": 3,
+      "submission_title": "Initial Proposal Submission",
+      "file_path": "/submissions/siti_proposal_v1.pdf",
+      "submitted_at": "2026-05-05",
+      "submission_type": "proposal",
+      "status": "pending",
+      "project_id": 2
+    }
+  ]
+}

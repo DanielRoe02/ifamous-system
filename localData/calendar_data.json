@@ -1,0 +1,61 @@
+{
+  "weekly_recurring_occupancy": [
+    {
+      "day_of_week": 1, 
+      "day_name": "Monday",
+      "slots": [
+        {
+          "slot_id": "slot_mon_1",
+          "start_time": "09:00",
+          "end_time": "12:00",
+          "label": "Application Development Project I - Lab Session",
+          "location": "MJIIT Lab 4",
+          "is_blocking": true
+        }
+      ]
+    },
+    {
+      "day_of_week": 3,
+      "day_name": "Wednesday",
+      "slots": [
+        {
+          "slot_id": "slot_wed_1",
+          "start_time": "14:00",
+          "end_time": "16:00",
+          "label": "Advanced AI Systems Lecture",
+          "location": "Dewan Kuliah 2",
+          "is_blocking": true
+        }
+      ]
+    }
+  ],
+  "specific_calendar_events": [
+    {
+      "event_id": "evt_may_10_1",
+      "target_date": "2026-05-10",
+      "due_time": "23:59",
+      "title": "ASSIGNMENT 1 is due",
+      "type": "assignment",
+      "course_context": "Software Engineering",
+      "badge_color": "maroon"
+    },
+    {
+      "event_id": "evt_may_10_2",
+      "target_date": "2026-05-10",
+      "due_time": "23:59",
+      "title": "Lab Exercise 4 (4%) due",
+      "type": "lab",
+      "course_context": "Database Systems",
+      "badge_color": "gold"
+    },
+    {
+      "event_id": "evt_may_11_1",
+      "target_date": "2026-05-11",
+      "due_time": "12:00",
+      "title": "Project Proposal (5% submission)",
+      "type": "fyp_milestone",
+      "course_context": "I-FAMOUS Management",
+      "badge_color": "maroon"
+    }
+  ]
+}

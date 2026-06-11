@@ -1,0 +1,22 @@
+$kind: http-request
+name: AI Assistant API
+url: http://localhost:3000/api/assistant/chat
+method: GET
+body:
+  type: json
+  content: "{\r
+
+    \  \"messages\": [\r
+
+    \    {\r
+
+    \      \"role\": \"user\",\r
+
+    \      \"content\": \"Hi, I am a student. Where can I upload my timetable image to avoid clashes with my Phase 1 Presentation?\"\r
+
+    \    }\r
+
+    \  ]\r
+
+    }"
+order: 1780075039875
