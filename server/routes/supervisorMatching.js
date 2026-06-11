@@ -1,0 +1,703 @@
+// server/routes/supervisorMatching.js
+
+const express = require("express");
+const mysql = require("mysql2/promise");
+const multer = require("multer");
+const mammoth = require("mammoth");
+const pdfParseModule = require("pdf-parse");
+
+const router = express.Router();
+
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GROQ_CHAT_MODEL = process.env.GROQ_CHAT_MODEL || "llama-3.1-8b-instant";
+
+// Support different pdf-parse export styles
+const pdfParse = pdfParseModule.default || pdfParseModule;
+
+// Store uploaded proposal file in memory
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 15 * 1024 * 1024,
+  },
+});
+
+// Database pool
+const db = mysql.createPool({
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT || 3306,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+});
+
+// ------------------------------------------------------------
+// Get lecturer / supervisor candidates from database
+// ------------------------------------------------------------
+async function getLecturerCandidates() {
+  const [rows] = await db.query(`
+    SELECT 
+      user_id,
+      full_name,
+      email,
+      phone_number,
+      expertise,
+      affiliation,
+      co_org_name,
+      is_utm_staff
+    FROM users
+    WHERE expertise IS NOT NULL
+      AND TRIM(expertise) <> ''
+    ORDER BY full_name ASC
+    LIMIT 30
+  `);
+
+  return rows.map((row) => ({
+    user_id: row.user_id,
+    name: row.full_name || row.email || "Unnamed Lecturer",
+    email: row.email || "-",
+    phone: row.phone_number || "-",
+    expertise: row.expertise || "General academic supervision",
+    affiliation: row.affiliation || row.co_org_name || "Universiti Teknologi Malaysia",
+    is_utm_staff: row.is_utm_staff,
+  }));
+}
+
+// ------------------------------------------------------------
+// Fallback matching if Groq unavailable
+// ------------------------------------------------------------
+function simpleFallbackMatch(project, lecturers) {
+  const projectText = `
+    ${project.projectTitle || ""}
+    ${project.abstract || ""}
+    ${project.keywords || ""}
+    ${project.memberText || ""}
+  `.toLowerCase();
+
+  const scored = lecturers.map((lecturer) => {
+    const expertiseWords = String(lecturer.expertise || "")
+      .toLowerCase()
+      .split(/[,;\s]+/)
+      .filter((word) => word.length > 2);
+
+    let score = 55;
+
+    expertiseWords.forEach((word) => {
+      if (projectText.includes(word)) {
+        score += 8;
+      }
+    });
+
+    if (projectText.includes("ai") && lecturer.expertise.toLowerCase().includes("artificial")) {
+      score += 12;
+    }
+
+    if (projectText.includes("machine") && lecturer.expertise.toLowerCase().includes("machine")) {
+      score += 10;
+    }
+
+    if (projectText.includes("web") && lecturer.expertise.toLowerCase().includes("web")) {
+      score += 10;
+    }
+
+    if (projectText.includes("database") && lecturer.expertise.toLowerCase().includes("database")) {
+      score += 10;
+    }
+
+    if (projectText.includes("iot") && lecturer.expertise.toLowerCase().includes("iot")) {
+      score += 10;
+    }
+
+    if (projectText.includes("software") && lecturer.expertise.toLowerCase().includes("software")) {
+      score += 10;
+    }
+
+    score = Math.min(score, 95);
+
+    return {
+      user_id: lecturer.user_id,
+      name: lecturer.name,
+      title: lecturer.is_utm_staff ? "UTM Academic Staff" : "External Examiner / Lecturer",
+      faculty: lecturer.affiliation || "Faculty of Computing",
+      department: "Software Engineering",
+      email: lecturer.email,
+      phone: lecturer.phone,
+      expertise: lecturer.expertise,
+      score,
+      workload: "Available",
+      recentProjects: [
+        "Academic Management System",
+        "Student Monitoring Dashboard",
+        "Assessment Workflow Platform",
+      ],
+      reason:
+        "This lecturer is recommended because their expertise contains keywords related to the submitted project title, abstract, or project keywords.",
+      status: score >= 90 ? "Best Match" : score >= 80 ? "Recommended" : "Alternative",
+    };
+  });
+
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map((item, index) => ({
+      ...item,
+      rank: index + 1,
+    }));
+}
+
+// ------------------------------------------------------------
+// Groq supervisor matching
+// ------------------------------------------------------------
+async function groqSupervisorMatch(project, lecturers) {
+  if (!GROQ_API_KEY) {
+    return simpleFallbackMatch(project, lecturers);
+  }
+
+  const lecturerListText = lecturers
+    .map(
+      (lecturer, index) => `
+${index + 1}. user_id: ${lecturer.user_id}
+Name: ${lecturer.name}
+Email: ${lecturer.email}
+Phone: ${lecturer.phone}
+Affiliation: ${lecturer.affiliation}
+Expertise: ${lecturer.expertise}
+`
+    )
+    .join("\n");
+
+  const membersText =
+    Array.isArray(project.members) && project.members.length > 0
+      ? project.members
+          .map((member, index) => `${index + 1}. ${member.name || "Unknown"} (${member.matricNo || "No matric"})`)
+          .join("\n")
+      : project.memberText || project.studentName || "Not provided";
+
+  const prompt = `
+You are an AI supervisor matching engine for I-FAMOUS, an Intelligent FYP Assessment Management and Outcome System.
+
+Important:
+A proposal may be an individual project or a group project. Match the supervisor based on the PROJECT CONTENT, not based on the number of students.
+
+Your task:
+Rank the best 3 supervisors for the FYP project based on project title, abstract, keywords, and lecturer expertise.
+
+Project members:
+${membersText}
+
+Project information:
+Project Type: ${project.projectType || "Not provided"}
+Project Title: ${project.projectTitle || "Not provided"}
+Keywords: ${project.keywords || "Not provided"}
+Abstract:
+${project.abstract || "Not provided"}
+
+Lecturer candidates:
+${lecturerListText}
+
+Return ONLY valid JSON.
+Do not include markdown.
+Do not include explanation outside JSON.
+
+JSON format:
+[
+  {
+    "rank": 1,
+    "user_id": 123,
+    "name": "Lecturer Name",
+    "title": "Senior Lecturer",
+    "faculty": "Faculty of Computing",
+    "department": "Software Engineering",
+    "email": "email@example.com",
+    "phone": "phone number",
+    "expertise": "expertise text",
+    "score": 94,
+    "workload": "Available",
+    "recentProjects": ["Project 1", "Project 2", "Project 3"],
+    "reason": "Short reason why this lecturer matches the project.",
+    "status": "Best Match"
+  }
+]
+
+Rules:
+- Score must be between 0 and 100.
+- Rank must be 1, 2, and 3.
+- Use only lecturers from the candidate list.
+- Match based on semantic relevance, not exact keywords only.
+- If project involves AI, NLP, recommendation, automation, or data analysis, prioritize lecturers with AI/ML/Data expertise.
+- If project involves web system, dashboard, software architecture, or backend, prioritize Software Engineering/Web/System lecturers.
+- If project involves database or academic records, prioritize Database/Information System lecturers.
+`;
+
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${GROQ_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: GROQ_CHAT_MODEL,
+      messages: [
+        {
+          role: "system",
+          content: "You are a strict JSON generator. Always return valid JSON only.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      temperature: 0.2,
+      max_tokens: 1800,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Groq supervisor matching error:", errorText);
+    return simpleFallbackMatch(project, lecturers);
+  }
+
+  const data = await response.json();
+  const aiText = data.choices?.[0]?.message?.content || "";
+
+  try {
+    const parsed = JSON.parse(aiText);
+
+    if (!Array.isArray(parsed)) {
+      throw new Error("AI response is not an array");
+    }
+
+    return parsed.slice(0, 3).map((item, index) => ({
+      rank: index + 1,
+      user_id: item.user_id || null,
+      name: item.name || "Unknown Lecturer",
+      title: item.title || "Lecturer",
+      faculty: item.faculty || "Faculty of Computing",
+      department: item.department || "Software Engineering",
+      email: item.email || "-",
+      phone: item.phone || "-",
+      expertise: item.expertise || "General academic supervision",
+      score: Number(item.score) || 75,
+      workload: item.workload || "Available",
+      recentProjects: Array.isArray(item.recentProjects)
+        ? item.recentProjects
+        : ["Academic Management System", "Student Dashboard", "Assessment Platform"],
+      reason:
+        item.reason ||
+        "This lecturer is recommended based on project similarity and lecturer expertise.",
+      status:
+        item.status ||
+        (index === 0 ? "Best Match" : index === 1 ? "Recommended" : "Alternative"),
+    }));
+  } catch (parseError) {
+    console.error("Failed to parse Groq JSON:", parseError);
+    console.error("Raw AI text:", aiText);
+    return simpleFallbackMatch(project, lecturers);
+  }
+}
+
+// ------------------------------------------------------------
+// Extract text from uploaded proposal file
+// ------------------------------------------------------------
+async function extractTextFromFile(file) {
+  if (!file) {
+    throw new Error("No file uploaded.");
+  }
+
+  const fileName = file.originalname || "";
+  const mimeType = file.mimetype || "";
+  const lowerName = fileName.toLowerCase();
+
+  if (lowerName.endsWith(".txt") || mimeType.includes("text/plain")) {
+    return file.buffer.toString("utf8");
+  }
+
+  if (
+    lowerName.endsWith(".docx") ||
+    mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  ) {
+    const result = await mammoth.extractRawText({ buffer: file.buffer });
+    return result.value || "";
+  }
+
+  if (lowerName.endsWith(".pdf") || mimeType === "application/pdf") {
+    const result = await pdfParse(file.buffer);
+    return result.text || "";
+  }
+
+  throw new Error("Unsupported file type. Please upload .txt, .docx, or .pdf file.");
+}
+
+// ------------------------------------------------------------
+// Extract multiple members with simple regex
+// ------------------------------------------------------------
+function extractMembersSimple(rawText) {
+  const text = String(rawText || "").replace(/\r/g, "");
+  const members = [];
+  const seen = new Set();
+
+  // Matches:
+  // 1. NAME (A24MJ5074)
+  // NAME (A24MJ5074)
+  // NAME - A24MJ5074
+  const memberRegex =
+    /(?:^|\n)\s*(?:\d+[\.\)]\s*)?([A-Z][A-Z\s'@\/\.-]{5,}?)\s*(?:\(|-|–|—)?\s*(A\d{2}[A-Z]{2}\d{4})\s*\)?/gim;
+
+  let match;
+  while ((match = memberRegex.exec(text)) !== null) {
+    const name = String(match[1] || "")
+      .replace(/MEMBERS?:/gi, "")
+      .replace(/NAME/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const matricNo = String(match[2] || "").trim().toUpperCase();
+
+    if (!name || !matricNo) continue;
+
+    const key = matricNo;
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    members.push({
+      name,
+      matricNo,
+    });
+  }
+
+  return members;
+}
+
+// ------------------------------------------------------------
+// Simple proposal field extraction
+// ------------------------------------------------------------
+function simpleProposalFieldExtraction(rawText) {
+  const text = String(rawText || "").replace(/\r/g, "").trim();
+
+  const getAfterLabel = (labels) => {
+    for (const label of labels) {
+      const regex = new RegExp(
+        `${label}\\s*[:\\-]?\\s*([\\s\\S]*?)(?=\\n\\s*(Members|Student Name|Matric|Metric|Project Type|Project Title|Title|Abstract|Problem Statement|Keywords|Project Objectives|Implementation)\\s*[:\\-]|$)`,
+        "i"
+      );
+      const match = text.match(regex);
+      if (match && match[1]) {
+        return match[1].trim().replace(/\n+/g, " ");
+      }
+    }
+    return "";
+  };
+
+  const members = extractMembersSimple(text);
+  const memberText = members
+    .map((member, index) => `${index + 1}. ${member.name} (${member.matricNo})`)
+    .join("\n");
+
+  let studentName = members[0]?.name || getAfterLabel(["Student Name", "Name"]);
+  let matricNo = members[0]?.matricNo || getAfterLabel(["Matric Number", "Metric Number", "Matric No", "Metric No"]);
+  let projectType = getAfterLabel(["Project Type"]);
+  let projectTitle = getAfterLabel(["Project Title", "Title"]);
+  let abstract = getAfterLabel(["Abstract", "Problem Statement"]);
+  let keywords = getAfterLabel(["Keywords", "Keyword"]);
+
+  if (!projectTitle) {
+    const titleMatch = text.match(/Project Title\s*:\s*(.+)/i);
+    if (titleMatch) {
+      projectTitle = titleMatch[1].trim();
+    }
+  }
+
+  if (!projectTitle) {
+    const lines = text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const titleLine = lines.find((line) =>
+      /system|application|platform|dashboard|ai|iot|management|advisor|audit|prediction|classification|detection/i.test(line)
+    );
+
+    projectTitle = titleLine || lines[0] || "";
+  }
+
+  if (!abstract) {
+    const problemStart = text.search(/Problem Statement/i);
+    if (problemStart >= 0) {
+      abstract = text.slice(problemStart).replace(/Problem Statement\s*[:\-]?/i, "").trim();
+    } else {
+      const abstractStart = text.search(/Abstract/i);
+      if (abstractStart >= 0) {
+        abstract = text.slice(abstractStart).replace(/Abstract\s*[:\-]?/i, "").trim();
+      } else {
+        abstract = text.slice(0, 1800);
+      }
+    }
+  }
+
+  if (!keywords) {
+    const keywordCandidates = [];
+    const lower = text.toLowerCase();
+
+    const possibleKeywords = [
+      "artificial intelligence",
+      "machine learning",
+      "data analytics",
+      "supervisor matching",
+      "fyp management",
+      "scheduling",
+      "dashboard",
+      "software engineering",
+      "database",
+      "web application",
+      "automation",
+      "iot",
+      "academic information system",
+      "vue.js",
+      "vue",
+      "state management",
+      "academic advisor",
+      "credit audit",
+      "pinia",
+    ];
+
+    possibleKeywords.forEach((keyword) => {
+      if (lower.includes(keyword)) keywordCandidates.push(keyword);
+    });
+
+    keywords = keywordCandidates.join(", ");
+  }
+
+  return {
+    studentName,
+    matricNo,
+    members,
+    memberText,
+    projectType: projectType || "Development",
+    projectTitle,
+    abstract,
+    keywords,
+    rawText: text,
+  };
+}
+
+// ------------------------------------------------------------
+// Groq extraction for proposal fields
+// ------------------------------------------------------------
+async function groqExtractProposalFields(rawText) {
+  const simple = simpleProposalFieldExtraction(rawText);
+
+  if (!GROQ_API_KEY) {
+    return {
+      source: "fallback",
+      ...simple,
+    };
+  }
+
+  const prompt = `
+You are an information extraction assistant for I-FAMOUS.
+
+A proposal may contain one student or multiple group members.
+
+Extract proposal information from the text below.
+
+Return ONLY valid JSON.
+No markdown.
+No explanation.
+
+JSON format:
+{
+  "members": [
+    { "name": "student full name", "matricNo": "matric number" }
+  ],
+  "studentName": "first/main student name or empty string",
+  "matricNo": "first/main matric number or empty string",
+  "projectType": "Development or Research or empty string",
+  "projectTitle": "project title",
+  "abstract": "clean abstract/problem statement/synopsis text",
+  "keywords": "comma-separated keywords"
+}
+
+Extraction rules:
+- If there is a MEMBERS section, extract all listed members.
+- Matric number usually looks like A24MJ5074.
+- Project title may appear after "Project Title:".
+- If there is no Abstract section, use Problem Statement or Project Synopsis as abstract.
+- Do not invent members.
+- Do not invent matric numbers.
+- Keep abstract concise but informative.
+
+Proposal text:
+${String(rawText || "").slice(0, 10000)}
+`;
+
+  try {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: GROQ_CHAT_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: "You are a strict JSON generator. Always return valid JSON only.",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        temperature: 0.1,
+        max_tokens: 1800,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Groq proposal extraction error:", errorText);
+      return {
+        source: "fallback",
+        ...simple,
+      };
+    }
+
+    const data = await response.json();
+    const aiText = data.choices?.[0]?.message?.content || "";
+    const parsed = JSON.parse(aiText);
+
+    const parsedMembers = Array.isArray(parsed.members) ? parsed.members : [];
+    const finalMembers = parsedMembers.length > 0 ? parsedMembers : simple.members;
+
+    return {
+      source: "groq",
+      members: finalMembers,
+      memberText: finalMembers
+        .map((member, index) => `${index + 1}. ${member.name || ""} (${member.matricNo || ""})`)
+        .join("\n"),
+      studentName: parsed.studentName || finalMembers[0]?.name || simple.studentName,
+      matricNo: parsed.matricNo || finalMembers[0]?.matricNo || simple.matricNo,
+      projectType: parsed.projectType || simple.projectType || "Development",
+      projectTitle: parsed.projectTitle || simple.projectTitle,
+      abstract: parsed.abstract || simple.abstract,
+      keywords: parsed.keywords || simple.keywords,
+      rawText: String(rawText || ""),
+    };
+  } catch (error) {
+    console.error("Failed to extract proposal fields with Groq:", error);
+    return {
+      source: "fallback",
+      ...simple,
+    };
+  }
+}
+
+// ------------------------------------------------------------
+// POST: Extract proposal fields from uploaded file
+// ------------------------------------------------------------
+router.post(
+  "/api/supervisor-matching/extract-proposal",
+  upload.single("proposal"),
+  async (req, res) => {
+    try {
+      const rawText = await extractTextFromFile(req.file);
+
+      if (!rawText || rawText.trim().length < 20) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Could not extract enough text from this file. If this is a scanned PDF/image, OCR is required.",
+        });
+      }
+
+      const extracted = await groqExtractProposalFields(rawText);
+
+      res.json({
+        success: true,
+        fileName: req.file.originalname,
+        mimeType: req.file.mimetype,
+        extractionSource: extracted.source,
+        extracted,
+      });
+    } catch (error) {
+      console.error("Proposal extraction error:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to extract proposal file.",
+      });
+    }
+  }
+);
+
+// ------------------------------------------------------------
+// POST: AI Supervisor Matching
+// ------------------------------------------------------------
+router.post("/api/supervisor-matching/match", async (req, res) => {
+  try {
+    const project = req.body;
+
+    if (!project.projectTitle && !project.abstract && !project.keywords) {
+      return res.status(400).json({
+        success: false,
+        error: "Project title, abstract, or keywords are required.",
+      });
+    }
+
+    let lecturers = await getLecturerCandidates();
+
+    if (!lecturers.length) {
+      lecturers = [
+        {
+          user_id: 4017,
+          name: "Ts. Dr. Wong Mei Ling",
+          email: "wong.meiling@utm.my",
+          phone: "+60 13-555 6789",
+          expertise: "Artificial Intelligence, Machine Learning, Data Analytics",
+          affiliation: "Faculty of Computing",
+          is_utm_staff: 1,
+        },
+        {
+          user_id: 4019,
+          name: "Dr. David Kumar",
+          email: "david.kumar@utm.my",
+          phone: "+60 12-444 8912",
+          expertise: "Software Engineering, Web Application, System Architecture",
+          affiliation: "Faculty of Computing",
+          is_utm_staff: 1,
+        },
+        {
+          user_id: 4020,
+          name: "Dr. Lim Wei Jie",
+          email: "lim.weijie@utm.my",
+          phone: "+60 11-222 7634",
+          expertise: "Database Systems, Academic Information Systems, Automation",
+          affiliation: "Faculty of Computing",
+          is_utm_staff: 1,
+        },
+      ];
+    }
+
+    const recommendations = await groqSupervisorMatch(project, lecturers);
+
+    res.json({
+      success: true,
+      source: GROQ_API_KEY ? "groq" : "fallback",
+      project,
+      recommendations,
+    });
+  } catch (error) {
+    console.error("Supervisor matching route error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to perform supervisor matching.",
+      details: error.message,
+    });
+  }
+});
+
+module.exports = router;

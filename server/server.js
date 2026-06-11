@@ -17,6 +17,10 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 const assistantRouter = require("./routes/assistant");
 app.use(assistantRouter);
 
+// Import and use the supervisor matching router
+const supervisorMatchingRouter = require("./routes/supervisorMatching");
+app.use(supervisorMatchingRouter);
+
 // Database Connection
 const db = mysql.createPool({
   host: process.env.DB_HOST,
