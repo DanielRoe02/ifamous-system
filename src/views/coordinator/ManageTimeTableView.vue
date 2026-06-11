@@ -52,7 +52,7 @@ const handleFileUpload = async (event) => {
     formData.append('image', file)
 
     // Call our Node.js AI backend to process the image with Gemma 4
-    const response = await fetch('http://localhost:3000/api/assistant/analyze-timetable', {
+    const response = await fetch(, {
       method: 'POST',
       body: formData,
     })

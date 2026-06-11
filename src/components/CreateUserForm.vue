@@ -55,7 +55,7 @@ const handleFileUpload = async (event) => {
     const formData = new FormData()
     formData.append('image', file)
 
-    const response = await fetch('http://localhost:3000/api/assistant/extract-user-profile', {
+    const response = await fetch(, {
       method: 'POST',
       body: formData,
     })

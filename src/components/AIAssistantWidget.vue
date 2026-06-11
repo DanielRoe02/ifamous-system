@@ -395,7 +395,7 @@ const sendMessage = async () => {
   try {
     const token = localStorage.getItem('token')
     const response = await axios.post(
-      'http://localhost:3000/api/assistant/chat',
+      ,
       {
         messages: chatHistory.value,
       },
@@ -435,7 +435,7 @@ const executeCreateUser = async (msg) => {
   try {
     const token = localStorage.getItem('token')
     const response = await axios.post(
-      'http://localhost:3000/api/assistant/execute-user-creation',
+      ,
       msg.payload,
       {
         headers: { Authorization: `Bearer ${token}` },
@@ -470,7 +470,7 @@ const executeAutoSchedule = async (msg) => {
   try {
     const token = localStorage.getItem('token')
     const response = await axios.post(
-      'http://localhost:3000/api/timetable/auto-assign',
+      ,
       {
         startDate: msg.payload.startDate,
         endDate: msg.payload.endDate,
