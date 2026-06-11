@@ -934,12 +934,27 @@ app.put("/api/users/:id", (req, res) => {
   }
 
   db.query(
-    "CALL sp_UpdateUserProfile(?,?,?,?,?,?);",
-    [full_name, email, phone_number || null, expertise || null, affiliation || null, userId],
+    "CALL sp_UpdateUserProfile(?, ?, ?, ?, ?, ?);",
+    [
+      userId,
+      full_name,
+      email,
+      phone_number || null,
+      expertise || null,
+      affiliation || null
+    ],
     (err, results) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: "User updated successfully" });
-    });
+      if (err) {
+        console.error("Update user error:", err);
+        return res.status(500).json({ error: err.message });
+      }
+
+      res.json({
+        message: "User updated successfully",
+        affected_rows: results?.[0]?.[0]?.affected_rows ?? null
+      });
+    }
+  );
 });
 
 // Search API Endpoints for Autocomplete

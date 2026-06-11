@@ -11,10 +11,8 @@ const router = express.Router();
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_CHAT_MODEL = process.env.GROQ_CHAT_MODEL || "llama-3.1-8b-instant";
 
-// Support different pdf-parse export styles
 const pdfParse = pdfParseModule.default || pdfParseModule;
 
-// Store uploaded proposal file in memory
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -22,13 +20,24 @@ const upload = multer({
   },
 });
 
-// Database pool
+function shouldUseSsl() {
+  return (
+    process.env.DB_SSL === "true" ||
+    String(process.env.DB_HOST || "").includes("aivencloud.com")
+  );
+}
+
 const db = mysql.createPool({
   host: process.env.DB_HOST,
   port: process.env.DB_PORT || 3306,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
+  ssl: shouldUseSsl()
+    ? {
+        rejectUnauthorized: false,
+      }
+    : undefined,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
@@ -51,6 +60,8 @@ async function getLecturerCandidates() {
     FROM users
     WHERE expertise IS NOT NULL
       AND TRIM(expertise) <> ''
+      AND is_utm_staff = 1
+      AND LOWER(full_name) NOT LIKE '%coordinator%'
     ORDER BY full_name ASC
     LIMIT 30
   `);
@@ -91,27 +102,45 @@ function simpleFallbackMatch(project, lecturers) {
       }
     });
 
-    if (projectText.includes("ai") && lecturer.expertise.toLowerCase().includes("artificial")) {
+    if (
+      projectText.includes("ai") &&
+      lecturer.expertise.toLowerCase().includes("artificial")
+    ) {
       score += 12;
     }
 
-    if (projectText.includes("machine") && lecturer.expertise.toLowerCase().includes("machine")) {
+    if (
+      projectText.includes("machine") &&
+      lecturer.expertise.toLowerCase().includes("machine")
+    ) {
       score += 10;
     }
 
-    if (projectText.includes("web") && lecturer.expertise.toLowerCase().includes("web")) {
+    if (
+      projectText.includes("web") &&
+      lecturer.expertise.toLowerCase().includes("web")
+    ) {
       score += 10;
     }
 
-    if (projectText.includes("database") && lecturer.expertise.toLowerCase().includes("database")) {
+    if (
+      projectText.includes("database") &&
+      lecturer.expertise.toLowerCase().includes("database")
+    ) {
       score += 10;
     }
 
-    if (projectText.includes("iot") && lecturer.expertise.toLowerCase().includes("iot")) {
+    if (
+      projectText.includes("iot") &&
+      lecturer.expertise.toLowerCase().includes("iot")
+    ) {
       score += 10;
     }
 
-    if (projectText.includes("software") && lecturer.expertise.toLowerCase().includes("software")) {
+    if (
+      projectText.includes("software") &&
+      lecturer.expertise.toLowerCase().includes("software")
+    ) {
       score += 10;
     }
 
@@ -172,7 +201,10 @@ Expertise: ${lecturer.expertise}
   const membersText =
     Array.isArray(project.members) && project.members.length > 0
       ? project.members
-          .map((member, index) => `${index + 1}. ${member.name || "Unknown"} (${member.matricNo || "No matric"})`)
+          .map(
+            (member, index) =>
+              `${index + 1}. ${member.name || "Unknown"} (${member.matricNo || "No matric"})`
+          )
           .join("\n")
       : project.memberText || project.studentName || "Not provided";
 
@@ -333,21 +365,18 @@ async function extractTextFromFile(file) {
 }
 
 // ------------------------------------------------------------
-// Extract multiple members with simple regex
+// Extract multiple members using simple regex
 // ------------------------------------------------------------
 function extractMembersSimple(rawText) {
   const text = String(rawText || "").replace(/\r/g, "");
   const members = [];
   const seen = new Set();
 
-  // Matches:
-  // 1. NAME (A24MJ5074)
-  // NAME (A24MJ5074)
-  // NAME - A24MJ5074
   const memberRegex =
     /(?:^|\n)\s*(?:\d+[\.\)]\s*)?([A-Z][A-Z\s'@\/\.-]{5,}?)\s*(?:\(|-|–|—)?\s*(A\d{2}[A-Z]{2}\d{4})\s*\)?/gim;
 
   let match;
+
   while ((match = memberRegex.exec(text)) !== null) {
     const name = String(match[1] || "")
       .replace(/MEMBERS?:/gi, "")
@@ -384,11 +413,14 @@ function simpleProposalFieldExtraction(rawText) {
         `${label}\\s*[:\\-]?\\s*([\\s\\S]*?)(?=\\n\\s*(Members|Student Name|Matric|Metric|Project Type|Project Title|Title|Abstract|Problem Statement|Keywords|Project Objectives|Implementation)\\s*[:\\-]|$)`,
         "i"
       );
+
       const match = text.match(regex);
+
       if (match && match[1]) {
         return match[1].trim().replace(/\n+/g, " ");
       }
     }
+
     return "";
   };
 
@@ -398,7 +430,10 @@ function simpleProposalFieldExtraction(rawText) {
     .join("\n");
 
   let studentName = members[0]?.name || getAfterLabel(["Student Name", "Name"]);
-  let matricNo = members[0]?.matricNo || getAfterLabel(["Matric Number", "Metric Number", "Matric No", "Metric No"]);
+  let matricNo =
+    members[0]?.matricNo ||
+    getAfterLabel(["Matric Number", "Metric Number", "Matric No", "Metric No"]);
+
   let projectType = getAfterLabel(["Project Type"]);
   let projectTitle = getAfterLabel(["Project Title", "Title"]);
   let abstract = getAfterLabel(["Abstract", "Problem Statement"]);
@@ -418,7 +453,9 @@ function simpleProposalFieldExtraction(rawText) {
       .filter(Boolean);
 
     const titleLine = lines.find((line) =>
-      /system|application|platform|dashboard|ai|iot|management|advisor|audit|prediction|classification|detection/i.test(line)
+      /system|application|platform|dashboard|ai|iot|management|advisor|audit|prediction|classification|detection/i.test(
+        line
+      )
     );
 
     projectTitle = titleLine || lines[0] || "";
@@ -426,10 +463,12 @@ function simpleProposalFieldExtraction(rawText) {
 
   if (!abstract) {
     const problemStart = text.search(/Problem Statement/i);
+
     if (problemStart >= 0) {
       abstract = text.slice(problemStart).replace(/Problem Statement\s*[:\-]?/i, "").trim();
     } else {
       const abstractStart = text.search(/Abstract/i);
+
       if (abstractStart >= 0) {
         abstract = text.slice(abstractStart).replace(/Abstract\s*[:\-]?/i, "").trim();
       } else {
@@ -561,6 +600,7 @@ ${String(rawText || "").slice(0, 10000)}
     if (!response.ok) {
       const errorText = await response.text();
       console.error("Groq proposal extraction error:", errorText);
+
       return {
         source: "fallback",
         ...simple,
@@ -578,7 +618,10 @@ ${String(rawText || "").slice(0, 10000)}
       source: "groq",
       members: finalMembers,
       memberText: finalMembers
-        .map((member, index) => `${index + 1}. ${member.name || ""} (${member.matricNo || ""})`)
+        .map(
+          (member, index) =>
+            `${index + 1}. ${member.name || ""} (${member.matricNo || ""})`
+        )
         .join("\n"),
       studentName: parsed.studentName || finalMembers[0]?.name || simple.studentName,
       matricNo: parsed.matricNo || finalMembers[0]?.matricNo || simple.matricNo,
@@ -590,11 +633,53 @@ ${String(rawText || "").slice(0, 10000)}
     };
   } catch (error) {
     console.error("Failed to extract proposal fields with Groq:", error);
+
     return {
       source: "fallback",
       ...simple,
     };
   }
+}
+
+// ------------------------------------------------------------
+// Helper: format project record
+// ------------------------------------------------------------
+function formatProjectRecord(row) {
+  let members = [];
+
+  try {
+    if (Array.isArray(row.members_json)) {
+      members = row.members_json;
+    } else if (typeof row.members_json === "string") {
+      members = JSON.parse(row.members_json);
+    } else if (row.members_json) {
+      members = row.members_json;
+    }
+  } catch {
+    members = [];
+  }
+
+  members = members.filter((member) => member && member.name);
+
+  return {
+    project_id: row.project_id,
+    projectTitle: row.project_title,
+    projectType: row.project_type,
+    abstract: row.abstract,
+    keywords: row.keywords,
+    supervisor: {
+      user_id: row.supervisor_user_id,
+      name: row.supervisor_name,
+      email: row.supervisor_email,
+      expertise: row.supervisor_expertise,
+    },
+    matchScore: row.match_score,
+    status: row.status,
+    members,
+    memberCount: members.length,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 // ------------------------------------------------------------
@@ -626,6 +711,7 @@ router.post(
       });
     } catch (error) {
       console.error("Proposal extraction error:", error);
+
       res.status(500).json({
         success: false,
         error: error.message || "Failed to extract proposal file.",
@@ -692,9 +778,518 @@ router.post("/api/supervisor-matching/match", async (req, res) => {
     });
   } catch (error) {
     console.error("Supervisor matching route error:", error);
+
     res.status(500).json({
       success: false,
       error: "Failed to perform supervisor matching.",
+      details: error.message,
+    });
+  }
+});
+
+// ------------------------------------------------------------
+// POST: Assign supervisor to project
+// Workflow 6, 7, 8, 9
+// ------------------------------------------------------------
+router.post("/api/supervisor-matching/assign", async (req, res) => {
+  const connection = await db.getConnection();
+
+  try {
+    const { project, supervisor, coordinator } = req.body;
+
+    if (!project) {
+      return res.status(400).json({
+        success: false,
+        error: "Project data is required.",
+      });
+    }
+
+    if (!supervisor) {
+      return res.status(400).json({
+        success: false,
+        error: "Supervisor data is required.",
+      });
+    }
+
+    if (!project.projectTitle) {
+      return res.status(400).json({
+        success: false,
+        error: "Project title is required.",
+      });
+    }
+
+    const members = Array.isArray(project.members) ? project.members : [];
+
+    await connection.beginTransaction();
+
+    const [projectResult] = await connection.execute(
+      `
+      INSERT INTO fyp_projects (
+        project_title,
+        project_type,
+        abstract,
+        keywords,
+        supervisor_user_id,
+        supervisor_name,
+        supervisor_email,
+        supervisor_expertise,
+        match_score,
+        status
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        project.projectTitle,
+        project.projectType || "Development",
+        project.abstract || "",
+        project.keywords || "",
+        supervisor.user_id || null,
+        supervisor.name || "",
+        supervisor.email || "",
+        supervisor.expertise || "",
+        Number(supervisor.score) || 0,
+        "Assigned",
+      ]
+    );
+
+    const projectId = projectResult.insertId;
+
+    for (const member of members) {
+      if (!member.name && !member.matricNo) continue;
+
+      await connection.execute(
+        `
+        INSERT INTO fyp_project_members (
+          project_id,
+          student_name,
+          matric_no
+        )
+        VALUES (?, ?, ?)
+        `,
+        [projectId, member.name || "Unnamed Student", member.matricNo || ""]
+      );
+    }
+
+    // Notification for selected supervisor
+    await connection.execute(
+      `
+      INSERT INTO fyp_notifications (
+        project_id,
+        recipient_type,
+        recipient_name,
+        recipient_email,
+        title,
+        message
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
+      `,
+      [
+        projectId,
+        "Supervisor",
+        supervisor.name || "Supervisor",
+        supervisor.email || "",
+        "New FYP Supervision Assignment",
+        `You have been assigned to supervise the project "${project.projectTitle}".`,
+      ]
+    );
+
+    // Notification for coordinator
+    await connection.execute(
+      `
+      INSERT INTO fyp_notifications (
+        project_id,
+        recipient_type,
+        recipient_name,
+        recipient_email,
+        title,
+        message
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
+      `,
+      [
+        projectId,
+        "Coordinator",
+        coordinator?.name || "Coordinator",
+        coordinator?.email || "",
+        "Supervisor Assignment Completed",
+        `You assigned ${supervisor.name} as supervisor for the project "${project.projectTitle}".`,
+      ]
+    );
+
+    // Notifications for students
+    for (const member of members) {
+      await connection.execute(
+        `
+        INSERT INTO fyp_notifications (
+          project_id,
+          recipient_type,
+          recipient_name,
+          recipient_email,
+          title,
+          message
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        `,
+        [
+          projectId,
+          "Student",
+          member.name || "Student",
+          member.email || "",
+          "FYP Supervisor Assigned",
+          `Your project "${project.projectTitle}" has been assigned to ${supervisor.name}.`,
+        ]
+      );
+    }
+
+    await connection.commit();
+
+    res.json({
+      success: true,
+      message: "Supervisor assigned successfully.",
+      assignment: {
+        project_id: projectId,
+        projectTitle: project.projectTitle,
+        supervisorName: supervisor.name,
+        supervisorEmail: supervisor.email,
+        matchScore: Number(supervisor.score) || 0,
+        status: "Assigned",
+        members,
+      },
+    });
+  } catch (error) {
+    await connection.rollback();
+
+    console.error("Assign supervisor error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Failed to assign supervisor.",
+      details: error.message,
+    });
+  } finally {
+    connection.release();
+  }
+});
+
+// ------------------------------------------------------------
+// GET: Project records
+// ------------------------------------------------------------
+router.get("/api/supervisor-matching/projects", async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT
+        p.project_id,
+        p.project_title,
+        p.project_type,
+        p.abstract,
+        p.keywords,
+        p.supervisor_user_id,
+        p.supervisor_name,
+        p.supervisor_email,
+        p.supervisor_expertise,
+        p.match_score,
+        p.status,
+        p.created_at,
+        p.updated_at,
+        COALESCE(
+          JSON_ARRAYAGG(
+            CASE
+              WHEN m.member_id IS NULL THEN NULL
+              ELSE JSON_OBJECT(
+                'member_id', m.member_id,
+                'name', m.student_name,
+                'matricNo', m.matric_no
+              )
+            END
+          ),
+          JSON_ARRAY()
+        ) AS members_json
+      FROM fyp_projects p
+      LEFT JOIN fyp_project_members m
+        ON p.project_id = m.project_id
+      GROUP BY
+        p.project_id,
+        p.project_title,
+        p.project_type,
+        p.abstract,
+        p.keywords,
+        p.supervisor_user_id,
+        p.supervisor_name,
+        p.supervisor_email,
+        p.supervisor_expertise,
+        p.match_score,
+        p.status,
+        p.created_at,
+        p.updated_at
+      ORDER BY p.created_at DESC
+    `);
+
+    const projects = rows.map((row) => formatProjectRecord(row));
+
+    res.json({
+      success: true,
+      projects,
+    });
+  } catch (error) {
+    console.error("Get project records error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Failed to load project records.",
+      details: error.message,
+    });
+  }
+});
+
+// ------------------------------------------------------------
+// GET: Notifications
+// Supports:
+// 1. ?all=true
+// 2. ?recipientEmail=danielramlann@utm.my
+// 3. ?recipientType=Coordinator
+// 4. ?roles=Coordinator,Supervisor&email=danielramlann@utm.my
+//
+// Multi-role logic:
+// - Coordinator can see all Coordinator notifications.
+// - Supervisor can only see Supervisor notifications sent to their own email.
+// - Student can only see Student notifications sent to their own email.
+// - Examiner can only see Examiner notifications sent to their own email.
+// ------------------------------------------------------------
+router.get("/api/supervisor-matching/notifications", async (req, res) => {
+  try {
+    const {
+      recipientEmail,
+      recipientType,
+      all,
+      roles,
+      email
+    } = req.query;
+
+    // ------------------------------------------------------------
+    // Debug mode: show all notifications
+    // Example:
+    // /api/supervisor-matching/notifications?all=true
+    // ------------------------------------------------------------
+    if (all === "true") {
+      const [rows] = await db.query(`
+        SELECT
+          notification_id,
+          project_id,
+          recipient_type,
+          recipient_name,
+          recipient_email,
+          title,
+          message,
+          is_read,
+          created_at
+        FROM fyp_notifications
+        ORDER BY created_at DESC, notification_id DESC
+        LIMIT 50
+      `);
+
+      return res.json({
+        success: true,
+        notifications: rows.map((row) => ({
+          notification_id: row.notification_id,
+          project_id: row.project_id,
+          recipientType: row.recipient_type,
+          recipientName: row.recipient_name,
+          recipientEmail: row.recipient_email,
+          title: row.title,
+          message: row.message,
+          isRead: Boolean(row.is_read),
+          createdAt: row.created_at,
+        })),
+      });
+    }
+
+    // ------------------------------------------------------------
+    // Multi-role mode
+    // Example:
+    // /api/supervisor-matching/notifications?roles=Coordinator,Supervisor&email=danielramlann@utm.my
+    //
+    // For Daniel:
+    // - Show all Coordinator notifications because Daniel is Coordinator.
+    // - Show Supervisor notifications only if recipient_email = Daniel email.
+    // ------------------------------------------------------------
+    if (roles && email) {
+      const roleList = String(roles)
+        .split(",")
+        .map((role) => role.trim())
+        .filter(Boolean);
+
+      const roleConditions = [];
+      const params = [];
+
+      if (roleList.includes("Coordinator")) {
+        roleConditions.push("(recipient_type = 'Coordinator')");
+      }
+
+      if (roleList.includes("Supervisor")) {
+        roleConditions.push(
+          "(recipient_type = 'Supervisor' AND LOWER(recipient_email) = LOWER(?))"
+        );
+        params.push(email);
+      }
+
+      if (roleList.includes("Student")) {
+        roleConditions.push(
+          "(recipient_type = 'Student' AND LOWER(recipient_email) = LOWER(?))"
+        );
+        params.push(email);
+      }
+
+      if (roleList.includes("Examiner")) {
+        roleConditions.push(
+          "(recipient_type = 'Examiner' AND LOWER(recipient_email) = LOWER(?))"
+        );
+        params.push(email);
+      }
+
+      if (roleConditions.length === 0) {
+        return res.json({
+          success: true,
+          notifications: [],
+        });
+      }
+
+      const [rows] = await db.query(
+        `
+        SELECT
+          notification_id,
+          project_id,
+          recipient_type,
+          recipient_name,
+          recipient_email,
+          title,
+          message,
+          is_read,
+          created_at
+        FROM fyp_notifications
+        WHERE ${roleConditions.join(" OR ")}
+        ORDER BY created_at DESC, notification_id DESC
+        LIMIT 50
+        `,
+        params
+      );
+
+      return res.json({
+        success: true,
+        notifications: rows.map((row) => ({
+          notification_id: row.notification_id,
+          project_id: row.project_id,
+          recipientType: row.recipient_type,
+          recipientName: row.recipient_name,
+          recipientEmail: row.recipient_email,
+          title: row.title,
+          message: row.message,
+          isRead: Boolean(row.is_read),
+          createdAt: row.created_at,
+        })),
+      });
+    }
+
+    // ------------------------------------------------------------
+    // Old/simple filter mode
+    // Examples:
+    // /api/supervisor-matching/notifications?recipientType=Coordinator
+    // /api/supervisor-matching/notifications?recipientEmail=danielramlann@utm.my
+    // /api/supervisor-matching/notifications?recipientType=Supervisor&recipientEmail=danielramlann@utm.my
+    // ------------------------------------------------------------
+    const whereParts = [];
+    const params = [];
+
+    if (recipientEmail) {
+      whereParts.push("LOWER(recipient_email) = LOWER(?)");
+      params.push(recipientEmail);
+    }
+
+    if (recipientType) {
+      whereParts.push("recipient_type = ?");
+      params.push(recipientType);
+    }
+
+    const whereSql =
+      whereParts.length > 0 ? `WHERE ${whereParts.join(" AND ")}` : "";
+
+    const [rows] = await db.query(
+      `
+      SELECT
+        notification_id,
+        project_id,
+        recipient_type,
+        recipient_name,
+        recipient_email,
+        title,
+        message,
+        is_read,
+        created_at
+      FROM fyp_notifications
+      ${whereSql}
+      ORDER BY created_at DESC, notification_id DESC
+      LIMIT 50
+      `,
+      params
+    );
+
+    return res.json({
+      success: true,
+      notifications: rows.map((row) => ({
+        notification_id: row.notification_id,
+        project_id: row.project_id,
+        recipientType: row.recipient_type,
+        recipientName: row.recipient_name,
+        recipientEmail: row.recipient_email,
+        title: row.title,
+        message: row.message,
+        isRead: Boolean(row.is_read),
+        createdAt: row.created_at,
+      })),
+    });
+  } catch (error) {
+    console.error("Get notifications error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Failed to load notifications.",
+      details: error.message,
+    });
+  }
+});
+
+// ------------------------------------------------------------
+// PATCH: Mark notification as read
+// ------------------------------------------------------------
+router.patch("/api/supervisor-matching/notifications/:notificationId/read", async (req, res) => {
+  try {
+    const { notificationId } = req.params;
+
+    const [result] = await db.execute(
+      `
+      UPDATE fyp_notifications
+      SET is_read = 1
+      WHERE notification_id = ?
+      `,
+      [notificationId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Notification not found.",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Notification marked as read.",
+    });
+  } catch (error) {
+    console.error("Mark notification as read error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Failed to mark notification as read.",
       details: error.message,
     });
   }

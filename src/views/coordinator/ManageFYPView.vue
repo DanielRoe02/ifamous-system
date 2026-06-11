@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import AppHeader from '@/components/AppHeader.vue'
 import AppSidebar from '@/components/AppSidebar.vue'
@@ -26,6 +26,8 @@ import {
   CheckCircle2,
   Plus,
   Trash2,
+  X,
+  Check,
 } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -33,13 +35,25 @@ const router = useRouter()
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
 const activeTab = ref('upload')
-const isMatching = ref(false)
+
 const isExtracting = ref(false)
-const matchError = ref('')
+const isMatching = ref(false)
+const isAssigning = ref(false)
+const isLoadingRecords = ref(false)
+
 const extractError = ref('')
 const extractSuccess = ref('')
-const matchSource = ref('demo')
+const matchError = ref('')
+const assignError = ref('')
+const recordsError = ref('')
+
 const extractionSource = ref('none')
+const matchSource = ref('demo')
+const selectedFileName = ref('')
+
+const showAssignModal = ref(false)
+const pendingSupervisor = ref(null)
+const lastAssignment = ref(null)
 
 const proposalForm = ref({
   members: [],
@@ -52,11 +66,10 @@ const proposalForm = ref({
   keywords: '',
 })
 
-const selectedFileName = ref('')
-
 const recommendedSupervisors = ref([
   {
     rank: 1,
+    user_id: 4017,
     name: 'Ts. Dr. Wong Mei Ling',
     title: 'Senior Lecturer',
     faculty: 'Faculty of Computing',
@@ -77,6 +90,7 @@ const recommendedSupervisors = ref([
   },
   {
     rank: 2,
+    user_id: 4019,
     name: 'Dr. David Kumar',
     title: 'Senior Lecturer',
     faculty: 'Faculty of Computing',
@@ -97,6 +111,7 @@ const recommendedSupervisors = ref([
   },
   {
     rank: 3,
+    user_id: 4020,
     name: 'Dr. Lim Wei Jie',
     title: 'Lecturer',
     faculty: 'Faculty of Computing',
@@ -118,32 +133,23 @@ const recommendedSupervisors = ref([
 ])
 
 const selectedSupervisor = ref(recommendedSupervisors.value[0])
+const projectRecords = ref([])
 
-const sampleProjects = ref([
-  {
-    members: '4 Members',
-    title: 'Software Engineering Smart Academic Advisor Audit System',
-    supervisor: 'Pending',
-    status: 'Needs Match',
-  },
-  {
-    members: '2 Members',
-    title: 'Smart Timetable Conflict Detection',
-    supervisor: 'Ts. Dr. Wong Mei Ling',
-    status: 'Assigned',
-  },
-  {
-    members: '1 Member',
-    title: 'IoT-Based Academic Monitoring System',
-    supervisor: 'Dr. Lim Wei Jie',
-    status: 'In Review',
-  },
-])
+const setActiveTab = async (tabName) => {
+  activeTab.value = tabName
+
+  if (tabName === 'records') {
+    await loadProjectRecords()
+  }
+}
 
 const updateMemberText = () => {
   proposalForm.value.memberText = proposalForm.value.members
     .filter((member) => member.name || member.matricNo)
-    .map((member, index) => `${index + 1}. ${member.name || 'Unnamed'} (${member.matricNo || 'No matric'})`)
+    .map(
+      (member, index) =>
+        `${index + 1}. ${member.name || 'Unnamed'} (${member.matricNo || 'No matric'})`,
+    )
     .join('\n')
 
   proposalForm.value.studentName = proposalForm.value.members[0]?.name || ''
@@ -155,6 +161,7 @@ const addMember = () => {
     name: '',
     matricNo: '',
   })
+
   updateMemberText()
 }
 
@@ -201,10 +208,10 @@ const handleFileUpload = async (event) => {
           .join('\n'),
       studentName: extracted.studentName || members[0]?.name || '',
       matricNo: extracted.matricNo || members[0]?.matricNo || '',
-      projectTitle: extracted.projectTitle || proposalForm.value.projectTitle,
-      projectType: extracted.projectType || proposalForm.value.projectType || 'Development',
-      abstract: extracted.abstract || proposalForm.value.abstract,
-      keywords: extracted.keywords || proposalForm.value.keywords,
+      projectTitle: extracted.projectTitle || '',
+      projectType: extracted.projectType || 'Development',
+      abstract: extracted.abstract || '',
+      keywords: extracted.keywords || '',
     }
 
     extractionSource.value = data.extractionSource || 'unknown'
@@ -290,13 +297,86 @@ const viewSupervisorProfile = (supervisor) => {
   activeTab.value = 'profile'
 }
 
-const assignSupervisor = (supervisorName) => {
-  alert(`${supervisorName} has been selected as the recommended supervisor for this project.`)
+const openAssignConfirmation = (supervisor) => {
+  pendingSupervisor.value = supervisor
+  assignError.value = ''
+  showAssignModal.value = true
+}
+
+const closeAssignConfirmation = () => {
+  if (isAssigning.value) return
+  showAssignModal.value = false
+  pendingSupervisor.value = null
+}
+
+const confirmAssignment = async () => {
+  if (!pendingSupervisor.value) return
+
+  assignError.value = ''
+
+  try {
+    isAssigning.value = true
+
+    const response = await fetch(`${API_BASE_URL}/api/supervisor-matching/assign`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        project: proposalForm.value,
+        supervisor: pendingSupervisor.value,
+      }),
+    })
+
+    const data = await response.json()
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || 'Failed to assign supervisor.')
+    }
+
+    lastAssignment.value = data.assignment
+    showAssignModal.value = false
+    pendingSupervisor.value = null
+    activeTab.value = 'success'
+
+    await loadProjectRecords()
+  } catch (error) {
+    console.error('Assign supervisor error:', error)
+    assignError.value = error.message || 'Failed to assign supervisor.'
+  } finally {
+    isAssigning.value = false
+  }
+}
+
+const loadProjectRecords = async () => {
+  recordsError.value = ''
+
+  try {
+    isLoadingRecords.value = true
+
+    const response = await fetch(`${API_BASE_URL}/api/supervisor-matching/projects`)
+    const data = await response.json()
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || 'Failed to load project records.')
+    }
+
+    projectRecords.value = data.projects || []
+  } catch (error) {
+    console.error('Load project records error:', error)
+    recordsError.value = error.message || 'Failed to load project records.'
+  } finally {
+    isLoadingRecords.value = false
+  }
 }
 
 const goToDashboard = () => {
   router.push('/dashboard')
 }
+
+onMounted(() => {
+  loadProjectRecords()
+})
 </script>
 
 <template>
@@ -332,8 +412,8 @@ const goToDashboard = () => {
               </div>
 
               <p class="text-white/80 max-w-3xl text-[16px] leading-relaxed">
-                Upload individual or group proposal files, extract project members and proposal
-                content, then run AI supervisor matching.
+                Upload individual or group proposal files, extract project members, run AI
+                supervisor matching, assign a supervisor, and track assigned projects.
               </p>
             </div>
 
@@ -372,20 +452,9 @@ const goToDashboard = () => {
 
           <div class="bg-white rounded-[26px] p-6 shadow-lg border border-black/10">
             <div class="w-14 h-14 rounded-2xl bg-[#5c001f] p-3 flex items-center justify-center">
-              <Users class="w-7 h-7 text-[#f8be17]" />
-            </div>
-            <p class="text-gray-500 font-semibold mt-5">Step 2</p>
-            <h3 class="text-xl font-bold text-black mt-1">Extract Members</h3>
-            <p class="text-sm text-gray-500 mt-2">
-              Detect individual or group project members automatically.
-            </p>
-          </div>
-
-          <div class="bg-white rounded-[26px] p-6 shadow-lg border border-black/10">
-            <div class="w-14 h-14 rounded-2xl bg-[#5c001f] p-3 flex items-center justify-center">
               <BrainCircuit class="w-7 h-7 text-[#f8be17]" />
             </div>
-            <p class="text-gray-500 font-semibold mt-5">Step 3</p>
+            <p class="text-gray-500 font-semibold mt-5">Step 2</p>
             <h3 class="text-xl font-bold text-black mt-1">AI Matching</h3>
             <p class="text-sm text-gray-500 mt-2">
               Compare project content with lecturer expertise.
@@ -396,10 +465,21 @@ const goToDashboard = () => {
             <div class="w-14 h-14 rounded-2xl bg-[#5c001f] p-3 flex items-center justify-center">
               <UserCheck class="w-7 h-7 text-[#f8be17]" />
             </div>
-            <p class="text-gray-500 font-semibold mt-5">Step 4</p>
+            <p class="text-gray-500 font-semibold mt-5">Step 3</p>
             <h3 class="text-xl font-bold text-black mt-1">Assign Supervisor</h3>
             <p class="text-sm text-gray-500 mt-2">
               Coordinator confirms the recommended supervisor.
+            </p>
+          </div>
+
+          <div class="bg-white rounded-[26px] p-6 shadow-lg border border-black/10">
+            <div class="w-14 h-14 rounded-2xl bg-[#5c001f] p-3 flex items-center justify-center">
+              <ClipboardList class="w-7 h-7 text-[#f8be17]" />
+            </div>
+            <p class="text-gray-500 font-semibold mt-5">Step 4</p>
+            <h3 class="text-xl font-bold text-black mt-1">Track Records</h3>
+            <p class="text-sm text-gray-500 mt-2">
+              Assigned project records are saved into Aiven MySQL.
             </p>
           </div>
         </section>
@@ -410,7 +490,7 @@ const goToDashboard = () => {
           <div class="bg-[#f7f1ea] px-7 pt-7 border-b border-[#e1d5cc]">
             <div class="flex flex-wrap gap-3">
               <button
-                @click="activeTab = 'upload'"
+                @click="setActiveTab('upload')"
                 :class="[
                   'px-5 py-3 rounded-t-[18px] font-bold flex items-center gap-2 transition-colors',
                   activeTab === 'upload'
@@ -423,7 +503,7 @@ const goToDashboard = () => {
               </button>
 
               <button
-                @click="activeTab = 'matching'"
+                @click="setActiveTab('matching')"
                 :class="[
                   'px-5 py-3 rounded-t-[18px] font-bold flex items-center gap-2 transition-colors',
                   activeTab === 'matching'
@@ -436,7 +516,7 @@ const goToDashboard = () => {
               </button>
 
               <button
-                @click="activeTab = 'profile'"
+                @click="setActiveTab('profile')"
                 :class="[
                   'px-5 py-3 rounded-t-[18px] font-bold flex items-center gap-2 transition-colors',
                   activeTab === 'profile'
@@ -449,7 +529,7 @@ const goToDashboard = () => {
               </button>
 
               <button
-                @click="activeTab = 'records'"
+                @click="setActiveTab('records')"
                 :class="[
                   'px-5 py-3 rounded-t-[18px] font-bold flex items-center gap-2 transition-colors',
                   activeTab === 'records'
@@ -652,7 +732,9 @@ const goToDashboard = () => {
                 </div>
 
                 <div class="mt-5">
-                  <label class="block text-sm font-bold text-gray-700 mb-2">Abstract / Problem Statement</label>
+                  <label class="block text-sm font-bold text-gray-700 mb-2">
+                    Abstract / Problem Statement
+                  </label>
                   <textarea
                     v-model="proposalForm.abstract"
                     rows="7"
@@ -738,7 +820,7 @@ const goToDashboard = () => {
                   </div>
 
                   <button
-                    @click="activeTab = 'upload'"
+                    @click="setActiveTab('upload')"
                     class="bg-[#e7ded3] text-[#5c001f] px-5 py-2.5 rounded-full font-bold hover:bg-[#d8c9bd] transition-colors"
                   >
                     Edit Proposal
@@ -813,7 +895,7 @@ const goToDashboard = () => {
                           </button>
 
                           <button
-                            @click="assignSupervisor(supervisor.name)"
+                            @click="openAssignConfirmation(supervisor)"
                             class="bg-[#5c001f] text-white px-5 py-2.5 rounded-full font-bold hover:bg-[#4a0019] transition-colors border-none"
                           >
                             Assign
@@ -882,7 +964,7 @@ const goToDashboard = () => {
                   </div>
 
                   <button
-                    @click="assignSupervisor(selectedSupervisor.name)"
+                    @click="openAssignConfirmation(selectedSupervisor)"
                     class="bg-[#5c001f] text-white px-6 py-3 rounded-full font-bold hover:bg-[#4a0019] transition-colors border-none flex items-center gap-2"
                   >
                     <UserCheck class="w-5 h-5 text-[#f8be17]" />
@@ -985,11 +1067,80 @@ const goToDashboard = () => {
                 </div>
 
                 <button
-                  @click="activeTab = 'matching'"
+                  @click="setActiveTab('matching')"
                   class="mt-6 w-full bg-white/10 text-white px-6 py-3 rounded-full font-bold hover:bg-white/20 transition-colors border border-white/20 flex items-center justify-center gap-2"
                 >
                   Back to Recommendations
                 </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Assignment Success Screen -->
+          <div v-if="activeTab === 'success'" class="p-7">
+            <div
+              class="rounded-[28px] bg-white border border-[#e1d5cc] p-10 min-h-[420px] flex items-center justify-center text-center"
+            >
+              <div class="max-w-2xl">
+                <div
+                  class="w-24 h-24 rounded-full bg-green-100 mx-auto flex items-center justify-center border border-green-200"
+                >
+                  <Check class="w-12 h-12 text-green-700" />
+                </div>
+
+                <h2 class="text-[32px] font-bold mt-6 text-[#5c001f]">
+                  Supervisor Assigned Successfully!
+                </h2>
+
+                <p class="text-gray-600 mt-3 leading-relaxed">
+                  The assignment has been saved into Aiven MySQL. Notification records have also
+                  been created for the supervisor and project members.
+                </p>
+
+                <div v-if="lastAssignment" class="mt-7 rounded-[24px] bg-[#f7f1ea] border border-[#e1d5cc] p-6 text-left">
+                  <p class="text-sm font-bold text-[#5c001f] uppercase tracking-[0.18em]">
+                    Assignment Summary
+                  </p>
+
+                  <div class="mt-4 space-y-3 text-sm">
+                    <p>
+                      <span class="font-bold">Project:</span>
+                      {{ lastAssignment.projectTitle }}
+                    </p>
+                    <p>
+                      <span class="font-bold">Supervisor:</span>
+                      {{ lastAssignment.supervisorName }}
+                    </p>
+                    <p>
+                      <span class="font-bold">Match Score:</span>
+                      {{ lastAssignment.matchScore }}%
+                    </p>
+                    <p>
+                      <span class="font-bold">Status:</span>
+                      {{ lastAssignment.status }}
+                    </p>
+                    <p>
+                      <span class="font-bold">Members:</span>
+                      {{ lastAssignment.members?.length || 0 }}
+                    </p>
+                  </div>
+                </div>
+
+                <div class="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
+                  <button
+                    @click="setActiveTab('records')"
+                    class="bg-[#5c001f] text-white px-7 py-3 rounded-full font-bold hover:bg-[#4a0019] transition-colors border-none"
+                  >
+                    View Updated Project List
+                  </button>
+
+                  <button
+                    @click="setActiveTab('upload')"
+                    class="bg-[#e7ded3] text-[#5c001f] px-7 py-3 rounded-full font-bold hover:bg-[#d8c9bd] transition-colors border-none"
+                  >
+                    Upload Another Proposal
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1004,45 +1155,101 @@ const goToDashboard = () => {
                 <h2 class="text-[28px] font-bold">FYP Project Records</h2>
               </div>
 
-              <div class="relative">
-                <Search class="w-5 h-5 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  placeholder="Search project..."
-                  class="rounded-full border border-[#d8c9bd] pl-11 pr-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#f8be17]"
-                />
+              <div class="flex gap-3 items-center">
+                <button
+                  @click="loadProjectRecords"
+                  class="bg-[#5c001f] text-white px-5 py-3 rounded-full font-bold hover:bg-[#4a0019] transition-colors border-none"
+                >
+                  Refresh
+                </button>
+
+                <div class="relative">
+                  <Search class="w-5 h-5 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Search project..."
+                    class="rounded-full border border-[#d8c9bd] pl-11 pr-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#f8be17]"
+                  />
+                </div>
               </div>
             </div>
 
-            <div class="overflow-hidden rounded-[20px] border border-gray-200">
+            <div v-if="isLoadingRecords" class="rounded-[24px] border border-[#e1d5cc] p-8 text-center">
+              <Loader2 class="w-10 h-10 animate-spin text-[#5c001f] mx-auto" />
+              <p class="font-bold mt-4">Loading project records...</p>
+            </div>
+
+            <div v-else-if="recordsError" class="rounded-[24px] bg-red-50 border border-red-200 p-6">
+              <div class="flex gap-3">
+                <AlertTriangle class="w-6 h-6 text-red-600 shrink-0" />
+                <div>
+                  <h3 class="font-bold text-red-700">Failed to Load Records</h3>
+                  <p class="text-sm text-red-600 mt-1">{{ recordsError }}</p>
+                </div>
+              </div>
+            </div>
+
+            <div v-else-if="projectRecords.length === 0" class="rounded-[24px] border border-[#e1d5cc] p-8 text-center">
+              <ClipboardList class="w-12 h-12 text-[#5c001f] mx-auto" />
+              <h3 class="font-bold text-xl mt-4">No Assigned Projects Yet</h3>
+              <p class="text-gray-600 mt-2">
+                Assigned projects will appear here after the coordinator confirms a supervisor.
+              </p>
+            </div>
+
+            <div v-else class="overflow-hidden rounded-[20px] border border-gray-200">
               <table class="w-full text-left">
                 <thead class="bg-[#5c001f] text-white">
                   <tr>
+                    <th class="px-5 py-4 text-sm font-bold">No.</th>
                     <th class="px-5 py-4 text-sm font-bold">Members</th>
                     <th class="px-5 py-4 text-sm font-bold">Project Title</th>
                     <th class="px-5 py-4 text-sm font-bold">Supervisor</th>
+                    <th class="px-5 py-4 text-sm font-bold">Score</th>
                     <th class="px-5 py-4 text-sm font-bold">Status</th>
                   </tr>
                 </thead>
+
                 <tbody>
                   <tr
-                    v-for="project in sampleProjects"
-                    :key="project.title"
+                    v-for="project in projectRecords"
+                    :key="project.project_id"
                     class="border-b border-gray-100 bg-white hover:bg-[#fff8df] transition-colors"
                   >
-                    <td class="px-5 py-4 font-semibold">{{ project.members }}</td>
-                    <td class="px-5 py-4 text-gray-700">{{ project.title }}</td>
-                    <td class="px-5 py-4 text-gray-700">{{ project.supervisor }}</td>
+                    <td class="px-5 py-4 font-semibold">
+                      {{ project.project_id }}
+                    </td>
+
+                    <td class="px-5 py-4">
+                      <p class="font-bold">{{ project.memberCount }} member(s)</p>
+                      <p
+                        v-for="member in project.members.slice(0, 2)"
+                        :key="member.member_id"
+                        class="text-xs text-gray-500 mt-1"
+                      >
+                        {{ member.name }} ({{ member.matricNo }})
+                      </p>
+                      <p v-if="project.members.length > 2" class="text-xs text-gray-500 mt-1">
+                        +{{ project.members.length - 2 }} more
+                      </p>
+                    </td>
+
+                    <td class="px-5 py-4 text-gray-700 max-w-[360px]">
+                      {{ project.projectTitle }}
+                    </td>
+
+                    <td class="px-5 py-4 text-gray-700">
+                      <p class="font-bold">{{ project.supervisor.name }}</p>
+                      <p class="text-xs text-gray-500">{{ project.supervisor.email }}</p>
+                    </td>
+
+                    <td class="px-5 py-4">
+                      <span class="font-bold text-[#5c001f]">{{ project.matchScore }}%</span>
+                    </td>
+
                     <td class="px-5 py-4">
                       <span
-                        :class="[
-                          'px-3 py-1 rounded-full text-xs font-bold',
-                          project.status === 'Assigned'
-                            ? 'bg-green-100 text-green-700'
-                            : project.status === 'In Review'
-                              ? 'bg-blue-100 text-blue-700'
-                              : 'bg-[#fff3c4] text-[#5c001f]',
-                        ]"
+                        class="px-3 py-1 rounded-full text-xs font-bold bg-green-100 text-green-700"
                       >
                         {{ project.status }}
                       </span>
@@ -1054,6 +1261,111 @@ const goToDashboard = () => {
           </div>
         </section>
       </main>
+    </div>
+
+    <!-- Assign Confirmation Modal -->
+    <div
+      v-if="showAssignModal"
+      class="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-6"
+    >
+      <div class="bg-white rounded-[28px] shadow-2xl max-w-3xl w-full border border-[#e1d5cc] overflow-hidden">
+        <div class="bg-[#5c001f] text-white p-6 flex items-center justify-between">
+          <div>
+            <p class="text-[#f8be17] font-bold text-sm uppercase tracking-[0.18em]">
+              Assign Supervisor
+            </p>
+            <h2 class="text-[28px] font-bold mt-1">Confirm Assignment</h2>
+          </div>
+
+          <button
+            @click="closeAssignConfirmation"
+            class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center"
+          >
+            <X class="w-6 h-6" />
+          </button>
+        </div>
+
+        <div class="p-7 grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div class="rounded-[22px] bg-[#f7f1ea] border border-[#e1d5cc] p-5">
+            <p class="text-sm font-bold text-[#5c001f] uppercase tracking-[0.18em]">
+              Student & Project
+            </p>
+
+            <div class="mt-4 space-y-3 text-sm">
+              <p>
+                <span class="font-bold">Project Title:</span>
+                {{ proposalForm.projectTitle }}
+              </p>
+
+              <p>
+                <span class="font-bold">Project Type:</span>
+                {{ proposalForm.projectType }}
+              </p>
+
+              <p>
+                <span class="font-bold">Members:</span>
+                {{ proposalForm.members.length }} member(s)
+              </p>
+
+              <div class="pt-2">
+                <p
+                  v-for="member in proposalForm.members"
+                  :key="member.matricNo"
+                  class="text-xs text-gray-600 mt-1"
+                >
+                  {{ member.name }} ({{ member.matricNo }})
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-[22px] bg-[#fff3c4] border border-[#f8be17] p-5">
+            <p class="text-sm font-bold text-[#5c001f] uppercase tracking-[0.18em]">
+              Selected Supervisor
+            </p>
+
+            <div v-if="pendingSupervisor" class="mt-4">
+              <h3 class="text-xl font-bold text-[#5c001f]">{{ pendingSupervisor.name }}</h3>
+              <p class="text-sm text-gray-700 mt-1">{{ pendingSupervisor.title }}</p>
+              <p class="text-sm text-gray-700 mt-3">
+                {{ pendingSupervisor.expertise }}
+              </p>
+
+              <div class="mt-5 bg-white rounded-[18px] p-4 border border-[#e1d5cc]">
+                <p class="text-xs font-bold text-gray-500 uppercase">Expertise Match</p>
+                <p class="text-[32px] font-bold text-[#5c001f]">{{ pendingSupervisor.score }}%</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="assignError" class="mx-7 mb-5 rounded-[18px] bg-red-50 border border-red-200 p-4">
+          <div class="flex gap-3">
+            <AlertTriangle class="w-5 h-5 text-red-700 shrink-0" />
+            <p class="text-sm text-red-700">{{ assignError }}</p>
+          </div>
+        </div>
+
+        <div class="p-7 pt-0 flex flex-col sm:flex-row gap-3 justify-end">
+          <button
+            @click="closeAssignConfirmation"
+            :disabled="isAssigning"
+            class="bg-[#e7ded3] text-[#5c001f] px-6 py-3 rounded-full font-bold hover:bg-[#d8c9bd] transition-colors border-none disabled:opacity-60"
+          >
+            Cancel
+          </button>
+
+          <button
+            @click="confirmAssignment"
+            :disabled="isAssigning"
+            class="bg-[#5c001f] text-white px-6 py-3 rounded-full font-bold hover:bg-[#4a0019] transition-colors border-none flex items-center justify-center gap-2 disabled:opacity-60"
+          >
+            <Loader2 v-if="isAssigning" class="w-5 h-5 text-[#f8be17] animate-spin" />
+            <UserCheck v-else class="w-5 h-5 text-[#f8be17]" />
+            {{ isAssigning ? 'Assigning...' : 'Confirm Assignment' }}
+          </button>
+        </div>
+      </div>
     </div>
 
     <AppFooter class="mt-auto -mb-[30px]" />
