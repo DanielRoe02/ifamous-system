@@ -52,7 +52,7 @@ I-FAMOUS system knowledge:
 - Staff/Lecturer users usually use @utm.my email.
 - Normal external users may appear as outsiders.
 - Student creation may require import or separate student data because the basic user form is mainly for staff/outsiders.
-- The AI assistant uses local Ollama for local development or Groq Cloud AI for online deployment.
+- The AI assistant uses Ollama Cloud with gemma4:31b-cloud for AI responses.
 - If AI is unavailable, the cloud/local AI configuration may be missing or incorrect.
 
 IMPORTANT:
