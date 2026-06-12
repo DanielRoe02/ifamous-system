@@ -10,7 +10,7 @@ import imgLine2 from '@/assets/f25212dbf403cb5eaf6315aeac6fdb23a11d908c.svg'
 const router = useRouter()
 
 const step = ref(1)
-const stepperSteps = [{ label: 'Basic Info' }, { label: 'More Info' }]
+const stepperSteps = [{ label: 'Account Info' }, { label: 'Role Details' }]
 
 const formData = ref({
   fullName: '',
@@ -18,39 +18,43 @@ const formData = ref({
   password: '',
   confirmPassword: '',
   phoneNumber: '',
-  // affiliation: '',
 })
 
 const step2Data = ref({
-  // Student
   metricNumber: '',
   cgpa: '',
   totalCreditHour: '',
   creditHourProof: null,
-
-  // Staff & Outsider shared
   expertise: '',
-
-  // Staff
   department: '',
-  workloadCapacity: '',
-
-  // Outsider
+  workloadCapacity: '5',
   companyName: '',
 })
 
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
+const isDraggingProof = ref(false)
 const errors = ref({})
 
+const emailValue = computed(() => formData.value.email.trim().toLowerCase())
+
 const emailDomain = computed(() => {
-  const email = formData.value.email.toLowerCase()
+  const email = emailValue.value
+
   if (email.endsWith('@graduate.utm.my')) return 'student'
   if (email.endsWith('@utm.my')) return 'staff'
   return 'outsider'
 })
 
+const isStudent = computed(() => emailDomain.value === 'student')
 const isUtmStaff = computed(() => emailDomain.value === 'staff')
+const isOutsider = computed(() => emailDomain.value === 'outsider')
+
+const roleLabel = computed(() => {
+  if (isStudent.value) return 'Student account detected from @graduate.utm.my email'
+  if (isUtmStaff.value) return 'UTM staff account detected from @utm.my email'
+  return 'External user account detected'
+})
 
 const togglePassword = () => {
   showPassword.value = !showPassword.value
@@ -65,15 +69,47 @@ const validateStep1 = () => {
 
   if (!formData.value.fullName.trim()) errors.value.fullName = 'Full name is required.'
   if (!formData.value.email.trim()) errors.value.email = 'Email is required.'
+  if (formData.value.email && !/^\S+@\S+\.\S+$/.test(formData.value.email)) {
+    errors.value.email = 'Please enter a valid email address.'
+  }
 
   if (!formData.value.phoneNumber.trim()) errors.value.phoneNumber = 'Phone number is required.'
-  if (!/^\d+$/.test(formData.value.phoneNumber))
-    errors.value.phoneNumber = 'Phone number must be digits.'
+  if (formData.value.phoneNumber && !/^\d+$/.test(formData.value.phoneNumber)) {
+    errors.value.phoneNumber = 'Phone number must be digits only.'
+  }
 
   if (!formData.value.password) errors.value.password = 'Password is required.'
-  if (formData.value.password !== formData.value.confirmPassword)
+  if (formData.value.password.length > 0 && formData.value.password.length < 6) {
+    errors.value.password = 'Password must be at least 6 characters.'
+  }
+  if (formData.value.password !== formData.value.confirmPassword) {
     errors.value.confirmPassword = 'Passwords do not match.'
-  // if (!formData.value.affiliation.trim()) errors.value.affiliation = 'Affiliation is required.'
+  }
+
+  return Object.keys(errors.value).length === 0
+}
+
+const validateStep2 = () => {
+  errors.value = {}
+
+  if (isStudent.value) {
+    if (!step2Data.value.metricNumber.trim()) errors.value.metricNumber = 'Metric number is required.'
+    if (!step2Data.value.cgpa) errors.value.cgpa = 'CGPA is required.'
+    if (step2Data.value.cgpa && (Number(step2Data.value.cgpa) < 0 || Number(step2Data.value.cgpa) > 4)) {
+      errors.value.cgpa = 'CGPA must be between 0.00 and 4.00.'
+    }
+    if (!step2Data.value.totalCreditHour) errors.value.totalCreditHour = 'Completed credit hours are required.'
+    if (!step2Data.value.creditHourProof) errors.value.creditHourProof = 'Proof of credit hours is required.'
+  }
+
+  if (isUtmStaff.value) {
+    if (expertiseTags.value.length === 0) errors.value.expertise = 'At least one expertise tag is required.'
+    if (!step2Data.value.workloadCapacity) errors.value.workloadCapacity = 'Workload capacity is required.'
+  }
+
+  if (isOutsider.value) {
+    if (!step2Data.value.companyName.trim()) errors.value.companyName = 'Company or organization name is required.'
+  }
 
   return Object.keys(errors.value).length === 0
 }
@@ -92,24 +128,64 @@ const onStepClick = (targetStep) => {
   }
 }
 
-const handleFileUpload = (event) => {
-  const file = event.target.files[0]
-  if (file) {
-    step2Data.value.creditHourProof = file
+const allowedProofExtensions = ['.jpeg', '.jpg', '.png', '.pdf']
+
+const setProofFile = (file) => {
+  if (!file) return
+
+  const lowerName = file.name.toLowerCase()
+  const isAllowed = allowedProofExtensions.some((extension) => lowerName.endsWith(extension))
+
+  if (!isAllowed) {
+    errors.value.creditHourProof = 'Only JPEG, PNG, or PDF files are allowed.'
+    return
   }
+
+  step2Data.value.creditHourProof = file
+  delete errors.value.creditHourProof
+}
+
+const handleFileUpload = (event) => {
+  setProofFile(event.target.files?.[0])
+}
+
+const handleProofDrop = (event) => {
+  isDraggingProof.value = false
+  setProofFile(event.dataTransfer.files?.[0])
 }
 
 const expertiseTags = ref([])
 const expertiseInput = ref('')
 
+const commitExpertiseInput = () => {
+  const parts = expertiseInput.value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+  parts.forEach((item) => {
+    if (!expertiseTags.value.includes(item)) {
+      expertiseTags.value.push(item)
+    }
+  })
+
+  expertiseInput.value = ''
+}
+
 const addTag = (event) => {
   if (event.key === 'Enter' || event.key === ',') {
     event.preventDefault()
-    const val = expertiseInput.value.trim().replace(/,$/, '')
-    if (val && !expertiseTags.value.includes(val)) {
-      expertiseTags.value.push(val)
-    }
-    expertiseInput.value = ''
+    commitExpertiseInput()
+  }
+}
+
+const handleExpertisePaste = (event) => {
+  const pastedText = event.clipboardData?.getData('text') || ''
+
+  if (pastedText.includes(',')) {
+    event.preventDefault()
+    expertiseInput.value = pastedText
+    commitExpertiseInput()
   }
 }
 
@@ -119,24 +195,26 @@ const removeTag = (index) => {
 
 const submitRegistration = async () => {
   try {
-    // Map data to match the stored procedure signature expectations
+    if (!validateStep2()) return
+
     const payload = {
-      email: formData.value.email,
-      password: formData.value.password, // In a real app, hash this properly on the backend
-      fullName: formData.value.fullName,
-      phoneNumber: formData.value.phoneNumber,
-      // Pass null if the field doesn't apply to the user's role
-      companyName: emailDomain.value === 'outsider' ? step2Data.value.companyName : null,
-      expertise: ['staff', 'outsider'].includes(emailDomain.value)
-        ? expertiseTags.value.join(', ')
-        : null,
-      // Map metric number (student) or department (staff) to p_affiliation
-      affiliation:
-        emailDomain.value === 'staff'
-          ? step2Data.value.department
-          : emailDomain.value === 'student'
-            ? step2Data.value.metricNumber
-            : null,
+      email: formData.value.email.trim(),
+      password: formData.value.password,
+      fullName: formData.value.fullName.trim(),
+      phoneNumber: formData.value.phoneNumber.trim(),
+      roleType: emailDomain.value,
+
+      // Student details. Email stays in users.email; metric number stays in students.metric_number.
+      metricNumber: isStudent.value ? step2Data.value.metricNumber.trim().toUpperCase() : null,
+      cgpa: isStudent.value ? Number(step2Data.value.cgpa) : null,
+      totalCreditHour: isStudent.value ? Number(step2Data.value.totalCreditHour) : null,
+      creditHourProofName: isStudent.value ? step2Data.value.creditHourProof?.name || '' : null,
+
+      // Staff / external details.
+      companyName: isOutsider.value ? step2Data.value.companyName.trim() : null,
+      expertise: ['staff', 'outsider'].includes(emailDomain.value) ? expertiseTags.value.join(', ') : null,
+      affiliation: isUtmStaff.value ? step2Data.value.department.trim() || 'UTM Staff' : null,
+      workloadCapacity: isUtmStaff.value ? Number(step2Data.value.workloadCapacity || 5) : null,
     }
 
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
@@ -154,7 +232,7 @@ const submitRegistration = async () => {
       throw new Error(data.details || data.error || 'Registration failed')
     }
 
-    alert('Sign up successful!')
+    alert(data.message || 'Sign up successful!')
     router.push('/')
   } catch (error) {
     alert('Registration Error: ' + error.message)
@@ -166,102 +244,77 @@ const submitRegistration = async () => {
 <template>
   <div class="min-h-screen bg-[#e7ded3] flex flex-col items-center justify-between font-sans">
     <div class="w-full flex flex-col items-center justify-start pb-16">
-      <!-- Heading Area -->
       <AppHeader />
 
-      <!-- Main Content Area -->
       <div class="w-full flex items-center justify-center p-6 sm:p-8">
-        <!-- Register Form Container (White Card) -->
         <div
           class="bg-white w-full max-w-[1000px] flex flex-col items-center py-10 px-4 rounded-xl shadow-sm overflow-hidden relative"
         >
-          <!-- Stepper Component -->
           <FormStepper :current-step="step" :steps="stepperSteps" @step-click="onStepClick" />
 
-          <!-- Horizontal Separator Line below stepper -->
           <div class="w-full mb-10 flex justify-center px-8">
-            <img
-              :src="imgLine2"
-              alt="Separator"
-              class="w-full max-w-[900px] object-cover h-[2px]"
-            />
+            <img :src="imgLine2" alt="Separator" class="w-full max-w-[900px] object-cover h-[2px]" />
           </div>
 
-          <!-- Form Inner Box -->
           <div
-            class="bg-white border border-[#d9d9d9] rounded-[8px] w-full max-w-[500px] p-[24px] flex flex-col gap-[24px]"
+            class="bg-white border border-[#d9d9d9] rounded-[8px] w-full max-w-[540px] p-[24px] flex flex-col gap-[24px]"
           >
-            <!-- STEP 1 FORM -->
             <form
               v-if="step === 1"
               @submit.prevent="handleNext"
               class="flex flex-col gap-[20px] w-full transition-opacity duration-300"
             >
-              <!-- Full Name -->
+              <div class="rounded-xl border border-[#f8be17]/40 bg-[#fff8dc] px-4 py-3 text-sm text-[#5c001f]">
+                <p class="font-bold">Automatic role detection</p>
+                <p class="text-xs mt-1 text-[#5c001f]/80">
+                  Student: <b>@graduate.utm.my</b> · Staff/Supervisor: <b>@utm.my</b> · External: other email
+                </p>
+              </div>
+
               <div class="flex flex-col gap-1">
                 <label class="text-sm font-medium text-[#0d0b26]">Full Name</label>
                 <input
                   v-model="formData.fullName"
                   type="text"
-                  placeholder="John Doe"
+                  placeholder="Ahmad Daniel Tamingsari Bin Ramlan"
                   class="px-4 py-3 rounded-lg border border-[#d9d9d9] focus:ring-1 focus:ring-[#5c001f] focus:border-[#5c001f] outline-none w-full text-sm text-gray-900 placeholder:text-gray-500"
                 />
-                <span v-if="errors.fullName" class="text-red-500 text-xs">{{
-                  errors.fullName
-                }}</span>
+                <span v-if="errors.fullName" class="text-red-500 text-xs">{{ errors.fullName }}</span>
               </div>
 
-              <!-- Email -->
               <div class="flex flex-col gap-1">
                 <label class="text-sm font-medium text-[#0d0b26]">Email</label>
-                <span class="text-xs text-gray-500 mb-1 leading-tight"
-                  >Students please use @graduate.utm.my email. <br />
-                  Staff please use @utm.my email</span
-                >
+                <span class="text-xs text-gray-500 mb-1 leading-tight">
+                  Students use @graduate.utm.my. Staff use @utm.my.
+                </span>
                 <input
                   v-model="formData.email"
                   type="email"
-                  placeholder="johndoe@email.com"
+                  placeholder="ahmad.daniel@graduate.utm.my"
                   class="px-4 py-3 rounded-lg border border-[#d9d9d9] focus:ring-1 focus:ring-[#5c001f] focus:border-[#5c001f] outline-none w-full text-sm text-gray-900 placeholder:text-gray-500"
                 />
                 <span v-if="errors.email" class="text-red-500 text-xs">{{ errors.email }}</span>
-                <p v-if="isUtmStaff" class="text-amber-600 text-xs mt-1 font-medium">
-                  ✨ Automatically verified as UTM Staff
+                <p
+                  v-if="formData.email"
+                  class="text-xs mt-1 font-semibold"
+                  :class="isStudent ? 'text-blue-700' : isUtmStaff ? 'text-amber-700' : 'text-gray-600'"
+                >
+                  {{ roleLabel }}
                 </p>
               </div>
 
-              <!-- Phone Number -->
               <div class="flex flex-col gap-1">
                 <label class="text-sm font-medium text-[#0d0b26]">Phone Number</label>
-                <span class="text-xs text-gray-500 mb-1 leading-tight"
-                  >Must be accessible through Whatsapp. No spacing</span
-                >
+                <span class="text-xs text-gray-500 mb-1 leading-tight">Must be accessible through WhatsApp. No spacing.</span>
                 <input
                   v-model="formData.phoneNumber"
                   type="text"
-                  placeholder="Value"
+                  placeholder="0123456789"
                   class="px-4 py-3 rounded-lg border border-[#d9d9d9] focus:ring-1 focus:ring-[#5c001f] focus:border-[#5c001f] outline-none w-full text-sm text-gray-900 placeholder:text-gray-500"
                 />
-                <span v-if="errors.phoneNumber" class="text-red-500 text-xs">{{
-                  errors.phoneNumber
-                }}</span>
+                <span v-if="errors.phoneNumber" class="text-red-500 text-xs">{{ errors.phoneNumber }}</span>
               </div>
 
-              <!-- Affiliation -->
-              <!-- <div class="flex flex-col gap-1">
-              <label class="text-sm font-medium text-[#0d0b26]">Affiliation</label>
-              <input
-                v-model="formData.affiliation"
-                type="text"
-                placeholder="Value"
-                class="px-4 py-3 rounded-lg border border-[#d9d9d9] focus:ring-1 focus:ring-[#5c001f] focus:border-[#5c001f] outline-none w-full text-sm text-gray-900 placeholder:text-gray-500"
-              />
-              <span v-if="errors.affiliation" class="text-red-500 text-xs">{{
-                errors.affiliation
-              }}</span>
-            </div> -->
-
-              <!-- Password -->
               <div class="flex flex-col gap-1">
                 <label class="text-sm font-medium text-[#0d0b26]">Password</label>
                 <div class="relative">
@@ -276,49 +329,12 @@ const submitRegistration = async () => {
                     @click="togglePassword"
                     class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 p-1 hover:text-gray-800"
                   >
-                    <svg
-                      v-if="showPassword"
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke-width="1.5"
-                      stroke="currentColor"
-                      class="w-4 h-4"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88"
-                      />
-                    </svg>
-                    <svg
-                      v-else
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke-width="1.5"
-                      stroke="currentColor"
-                      class="w-4 h-4"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
-                      />
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                      />
-                    </svg>
+                    {{ showPassword ? 'Hide' : 'Show' }}
                   </button>
                 </div>
-                <span v-if="errors.password" class="text-red-500 text-xs">{{
-                  errors.password
-                }}</span>
+                <span v-if="errors.password" class="text-red-500 text-xs">{{ errors.password }}</span>
               </div>
 
-              <!-- Confirm Password -->
               <div class="flex flex-col gap-1">
                 <label class="text-sm font-medium text-[#0d0b26]">Confirm Password</label>
                 <div class="relative">
@@ -333,49 +349,12 @@ const submitRegistration = async () => {
                     @click="toggleConfirmPassword"
                     class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 p-1 hover:text-gray-800"
                   >
-                    <svg
-                      v-if="showConfirmPassword"
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke-width="1.5"
-                      stroke="currentColor"
-                      class="w-4 h-4"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88"
-                      />
-                    </svg>
-                    <svg
-                      v-else
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke-width="1.5"
-                      stroke="currentColor"
-                      class="w-4 h-4"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
-                      />
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                      />
-                    </svg>
+                    {{ showConfirmPassword ? 'Hide' : 'Show' }}
                   </button>
                 </div>
-                <span v-if="errors.confirmPassword" class="text-red-500 text-xs">{{
-                  errors.confirmPassword
-                }}</span>
+                <span v-if="errors.confirmPassword" class="text-red-500 text-xs">{{ errors.confirmPassword }}</span>
               </div>
 
-              <!-- Action Button -->
               <button
                 type="submit"
                 class="w-full bg-[#5c001f] hover:bg-[#7a0029] text-white font-medium py-3 px-4 rounded-lg transition-colors duration-200 mt-2 flex justify-center"
@@ -383,33 +362,36 @@ const submitRegistration = async () => {
                 Next
               </button>
 
-              <!-- Login Hyperlink -->
               <div class="text-center mt-2">
                 <p class="text-gray-600 text-sm">
                   Already have an account?
-                  <router-link to="/" class="text-[#5c001f] font-semibold hover:underline"
-                    >Sign in</router-link
-                  >
+                  <router-link to="/" class="text-[#5c001f] font-semibold hover:underline">Sign in</router-link>
                 </p>
               </div>
             </form>
 
-            <!-- STEP 2 FORM -->
             <form
               v-else-if="step === 2"
               @submit.prevent="submitRegistration"
               class="flex flex-col gap-[20px] w-full transition-opacity duration-300"
             >
-              <!-- STUDENT FIELDS -->
+              <div class="rounded-xl border border-[#5c001f]/10 bg-[#f8f1eb] px-4 py-3">
+                <p class="text-sm font-bold text-[#5c001f]">{{ roleLabel }}</p>
+                <p class="text-xs text-gray-600 mt-1">
+                  The system will automatically create the correct role record after registration.
+                </p>
+              </div>
+
               <template v-if="emailDomain === 'student'">
                 <div class="flex flex-col gap-1">
                   <label class="text-sm font-medium text-[#0d0b26]">Metric Number</label>
                   <input
                     v-model="step2Data.metricNumber"
                     type="text"
-                    placeholder="Value"
-                    class="px-4 py-3 rounded-lg border border-[#d9d9d9] focus:ring-1 focus:ring-[#5c001f] focus:border-[#5c001f] outline-none w-full text-sm text-gray-900 placeholder:text-gray-500"
+                    placeholder="A24MJ5074"
+                    class="px-4 py-3 rounded-lg border border-[#d9d9d9] focus:ring-1 focus:ring-[#5c001f] focus:border-[#5c001f] outline-none w-full text-sm text-gray-900 placeholder:text-gray-500 uppercase"
                   />
+                  <span v-if="errors.metricNumber" class="text-red-500 text-xs">{{ errors.metricNumber }}</span>
                 </div>
 
                 <div class="flex gap-4">
@@ -417,30 +399,40 @@ const submitRegistration = async () => {
                     <label class="text-sm font-medium text-[#0d0b26]">Current CGPA</label>
                     <input
                       v-model="step2Data.cgpa"
-                      type="text"
-                      placeholder="Value"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="4"
+                      placeholder="3.50"
                       class="px-4 py-3 rounded-lg border border-[#d9d9d9] focus:ring-1 focus:ring-[#5c001f] focus:border-[#5c001f] outline-none w-full text-sm text-gray-900 placeholder:text-gray-500"
                     />
+                    <span v-if="errors.cgpa" class="text-red-500 text-xs">{{ errors.cgpa }}</span>
                   </div>
                   <div class="flex flex-col gap-1 flex-1">
-                    <label class="text-sm font-medium text-[#0d0b26]">Total Credit Hour</label>
+                    <label class="text-sm font-medium text-[#0d0b26]">Completed Credit Hours</label>
                     <input
                       v-model="step2Data.totalCreditHour"
-                      type="text"
-                      placeholder="Value"
+                      type="number"
+                      min="0"
+                      placeholder="90"
                       class="px-4 py-3 rounded-lg border border-[#d9d9d9] focus:ring-1 focus:ring-[#5c001f] focus:border-[#5c001f] outline-none w-full text-sm text-gray-900 placeholder:text-gray-500"
                     />
+                    <span v-if="errors.totalCreditHour" class="text-red-500 text-xs">{{ errors.totalCreditHour }}</span>
                   </div>
                 </div>
 
                 <div class="flex flex-col gap-1">
-                  <label class="text-sm font-medium text-[#0d0b26]">Upload credit Hour</label>
-                  <span class="text-xs text-gray-500 mb-1 leading-tight"
-                    >Upload the credit hour you have taken total in this semester</span
-                  >
+                  <label class="text-sm font-medium text-[#0d0b26]">Proof of Credit Hours</label>
+                  <span class="text-xs text-gray-500 mb-1 leading-tight">
+                    Upload your credit hour proof. Accepted files: JPEG, PNG, PDF.
+                  </span>
 
                   <div
-                    class="relative border border-[#d9d9d9] rounded-lg bg-white overflow-hidden group hover:border-[#5c001f] transition-colors cursor-pointer"
+                    class="relative border rounded-lg bg-white overflow-hidden group transition-colors cursor-pointer"
+                    :class="isDraggingProof ? 'border-[#5c001f] bg-[#fff8dc]' : 'border-[#d9d9d9] hover:border-[#5c001f]'"
+                    @dragover.prevent="isDraggingProof = true"
+                    @dragleave.prevent="isDraggingProof = false"
+                    @drop.prevent="handleProofDrop"
                   >
                     <input
                       type="file"
@@ -450,19 +442,17 @@ const submitRegistration = async () => {
                     />
                     <div class="px-4 py-10 flex flex-col items-center justify-center text-center">
                       <p class="text-sm text-[#0d0b26] font-medium truncate w-full px-4">
-                        {{
-                          step2Data.creditHourProof ? step2Data.creditHourProof.name : 'Proof.jpeg'
-                        }}
+                        {{ step2Data.creditHourProof ? step2Data.creditHourProof.name : 'Click or drag proof file here' }}
                       </p>
                       <p v-if="!step2Data.creditHourProof" class="text-xs text-gray-400 mt-2">
-                        Click to browse or drag file here
+                        Drag & drop also supported
                       </p>
                     </div>
                   </div>
+                  <span v-if="errors.creditHourProof" class="text-red-500 text-xs">{{ errors.creditHourProof }}</span>
                 </div>
               </template>
 
-              <!-- STAFF FIELDS -->
               <template v-else-if="emailDomain === 'staff'">
                 <div class="flex flex-col gap-1">
                   <label class="text-sm font-medium text-[#0d0b26]">Expertise</label>
@@ -486,53 +476,50 @@ const submitRegistration = async () => {
                     <input
                       v-model="expertiseInput"
                       @keydown="addTag"
+                      @blur="commitExpertiseInput"
+                      @paste="handleExpertisePaste"
                       type="text"
                       placeholder="Type tag and press Enter"
                       class="flex-1 min-w-[150px] outline-none bg-transparent text-sm text-gray-900 placeholder:text-gray-500"
                     />
                   </div>
+                  <span v-if="errors.expertise" class="text-red-500 text-xs">{{ errors.expertise }}</span>
                 </div>
 
                 <div class="flex flex-col gap-1">
-                  <label class="text-sm font-medium text-[#0d0b26]">Department/Division</label>
+                  <label class="text-sm font-medium text-[#0d0b26]">Department / Division</label>
                   <input
                     v-model="step2Data.department"
                     type="text"
-                    placeholder="Value"
+                    placeholder="Software Engineering"
                     class="px-4 py-3 rounded-lg border border-[#d9d9d9] focus:ring-1 focus:ring-[#5c001f] focus:border-[#5c001f] outline-none w-full text-sm text-gray-900 placeholder:text-gray-500"
                   />
                 </div>
 
                 <div class="flex flex-col gap-1">
-                  <label class="text-sm font-medium text-[#0d0b26]"
-                    >Default workload capacity</label
-                  >
-                  <span class="text-xs text-gray-500 mb-1 leading-tight"
-                    >How many student you can take</span
-                  >
+                  <label class="text-sm font-medium text-[#0d0b26]">Default Workload Capacity</label>
+                  <span class="text-xs text-gray-500 mb-1 leading-tight">Maximum number of FYP students this supervisor can take.</span>
                   <input
                     v-model="step2Data.workloadCapacity"
                     type="number"
+                    min="1"
                     placeholder="5"
-                    value="5"
                     class="px-4 py-3 rounded-lg border border-[#d9d9d9] focus:ring-1 focus:ring-[#5c001f] focus:border-[#5c001f] outline-none w-full text-sm text-gray-900 placeholder:text-gray-500"
                   />
+                  <span v-if="errors.workloadCapacity" class="text-red-500 text-xs">{{ errors.workloadCapacity }}</span>
                 </div>
               </template>
 
-              <!-- OUTSIDER FIELDS -->
               <template v-else>
                 <div class="flex flex-col gap-1">
-                  <label class="text-sm font-medium text-[#0d0b26]"
-                    >Company/Organization Name</label
-                  >
+                  <label class="text-sm font-medium text-[#0d0b26]">Company / Organization Name</label>
                   <input
                     v-model="step2Data.companyName"
                     type="text"
-                    placeholder="5"
-                    value="5"
+                    placeholder="External Organization"
                     class="px-4 py-3 rounded-lg border border-[#d9d9d9] focus:ring-1 focus:ring-[#5c001f] focus:border-[#5c001f] outline-none w-full text-sm text-gray-900 placeholder:text-gray-500"
                   />
+                  <span v-if="errors.companyName" class="text-red-500 text-xs">{{ errors.companyName }}</span>
                 </div>
 
                 <div class="flex flex-col gap-1">
@@ -557,6 +544,8 @@ const submitRegistration = async () => {
                     <input
                       v-model="expertiseInput"
                       @keydown="addTag"
+                      @blur="commitExpertiseInput"
+                      @paste="handleExpertisePaste"
                       type="text"
                       placeholder="Type tag and press Enter"
                       class="flex-1 min-w-[150px] outline-none bg-transparent text-sm text-gray-900 placeholder:text-gray-500"
@@ -565,7 +554,6 @@ const submitRegistration = async () => {
                 </div>
               </template>
 
-              <!-- Step 2 Navigation Buttons -->
               <div class="flex gap-4 mt-2">
                 <button
                   type="button"
@@ -587,6 +575,5 @@ const submitRegistration = async () => {
       </div>
     </div>
   </div>
-  <!-- Footer -->
   <AppFooter />
 </template>

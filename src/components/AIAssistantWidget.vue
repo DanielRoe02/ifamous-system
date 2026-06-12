@@ -13,6 +13,9 @@
     <div
       v-else
       class="fixed bottom-6 right-6 flex flex-col shadow-2xl transition-all duration-300 ease-in-out z-50 bg-white border border-gray-200 overflow-hidden"
+      @dragover.prevent="handleAssistantDragOver"
+      @dragleave.prevent="handleAssistantDragLeave"
+      @drop.prevent="handleAssistantDrop"
       :class="{
         'w-[350px] h-[500px] rounded-xl': widgetState === 2,
         'w-[90vw] h-[90vh] max-w-[800px] max-h-[800px] rounded-xl sm:right-1/2 sm:bottom-1/2 sm:translate-x-1/2 sm:translate-y-1/2':
@@ -44,6 +47,16 @@
             <X class="h-5 w-5" />
           </button>
         </div>
+      </div>
+
+      <!-- Drag & Drop Image Overlay -->
+      <div
+        v-if="isDraggingImage"
+        class="absolute inset-0 z-20 bg-[#5C001F]/90 text-white flex flex-col items-center justify-center gap-3 text-center p-6"
+      >
+        <ImageIcon class="h-14 w-14 text-[#F8BE17]" />
+        <p class="text-lg font-bold">Drop image here</p>
+        <p class="text-sm text-white/80">The AI Assistant will attach the image for OCR analysis.</p>
       </div>
 
       <!-- Body -->
@@ -326,12 +339,41 @@
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, computed } from 'vue'
 import axios from 'axios'
 import { marked } from 'marked'
 import { Bot, Sparkles, Maximize2, Minimize2, X, Send, Image as ImageIcon } from 'lucide-vue-next'
+import { useAuth } from '@/composables/useAuth'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+const { user } = useAuth()
+
+const displayName = computed(() => {
+  const currentUser = user?.value || JSON.parse(localStorage.getItem('userSession') || 'null') || {}
+  const name = currentUser.full_name || currentUser.fullName || currentUser.name || currentUser.username || 'there'
+
+  if (String(name).toLowerCase().includes('daniel')) {
+    return 'Daniel'
+  }
+
+  return String(name).split(' ')[0] || 'there'
+})
+
+const userRole = computed(() => {
+  const currentUser = user?.value || JSON.parse(localStorage.getItem('userSession') || 'null') || {}
+  const roleInfo = currentUser.role_info || {}
+
+  if (roleInfo.is_coordinator || currentUser.is_coordinator) return 'Coordinator'
+  if (roleInfo.is_supervisor || currentUser.is_supervisor) return 'Supervisor'
+  if (roleInfo.is_examiner || currentUser.is_examiner) return 'Examiner'
+  if (roleInfo.is_student || currentUser.is_student) return 'Student'
+
+  return currentUser.role || currentUser.user_role || 'User'
+})
+
+const getWelcomeMessage = () => {
+  return `Hello ${displayName.value}, I am the I-FAMOUS AI Assistant. I can see you are currently using the system as ${userRole.value}. How can I help you today?`
+}
 
 marked.setOptions({
   gfm: true,
@@ -352,11 +394,12 @@ const isLoading = ref(false)
 const selectedImagePreview = ref(null)
 const selectedImageBase64 = ref(null)
 const fileInputRef = ref(null)
+const isDraggingImage = ref(false)
 
 const chatHistory = ref([
   {
     role: 'assistant',
-    content: 'Hello! I am the I-FAMOUS AI Assistant. How can I help you today?',
+    content: getWelcomeMessage(),
   },
 ])
 
@@ -376,10 +419,16 @@ const scrollToBottom = async () => {
   }
 }
 
-const handleFileUpload = (event) => {
-  const file = event.target.files[0]
-
+const attachImageFile = (file) => {
   if (!file) return
+
+  if (!file.type.startsWith('image/')) {
+    chatHistory.value.push({
+      role: 'assistant',
+      content: 'Please upload an image file only for the AI Assistant image analysis.',
+    })
+    return
+  }
 
   const reader = new FileReader()
 
@@ -389,7 +438,33 @@ const handleFileUpload = (event) => {
   }
 
   reader.readAsDataURL(file)
+}
+
+const handleFileUpload = (event) => {
+  const file = event.target.files?.[0]
+  attachImageFile(file)
   event.target.value = ''
+}
+
+const handleAssistantDragOver = (event) => {
+  if (event.dataTransfer?.types?.includes('Files')) {
+    isDraggingImage.value = true
+  }
+}
+
+const handleAssistantDragLeave = (event) => {
+  const currentTarget = event.currentTarget
+  const relatedTarget = event.relatedTarget
+
+  if (!relatedTarget || !currentTarget.contains(relatedTarget)) {
+    isDraggingImage.value = false
+  }
+}
+
+const handleAssistantDrop = (event) => {
+  isDraggingImage.value = false
+  const file = event.dataTransfer?.files?.[0]
+  attachImageFile(file)
 }
 
 const clearImage = () => {

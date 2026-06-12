@@ -43,8 +43,18 @@ const handleLogin = async () => {
     // Save session
     login(data.user, data.token)
 
-    // Redirect to dashboard
-    router.push('/dashboard')
+    // Redirect by role
+    if (Number(data.user?.is_admin) === 1) {
+      router.push('/admin-dashboard')
+    } else if (Number(data.user?.is_coordinator) === 1) {
+      router.push('/dashboard')
+    } else if (Number(data.user?.is_supervisor) === 1) {
+      router.push('/supervisor-dashboard')
+    } else if (Number(data.user?.is_student) === 1) {
+      router.push('/student-dashboard')
+    } else {
+      router.push('/dashboard')
+    }
   } catch (error) {
     errorMessage.value = error.message
   }

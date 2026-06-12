@@ -133,6 +133,27 @@ export const apiService = {
     return response.data
   },
 
+  getAdminUsers: async () => {
+    const response = await axios.get(`${API_BASE_URL}/api/admin/users`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+    })
+    return response.data
+  },
+
+  updateAdminUserRoles: async (userId, payload) => {
+    const response = await axios.put(`${API_BASE_URL}/api/admin/users/${userId}/roles`, payload, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+    })
+    return response.data
+  },
+
+  resetAdminUserPassword: async (userId, newPassword) => {
+    const response = await axios.put(`${API_BASE_URL}/api/admin/users/${userId}/password`, { newPassword }, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+    })
+    return response.data
+  },
+
   searchClasses: async (query, sessionId) => {
     const response = await axios.get(`${API_BASE_URL}/api/classes/search`, {
       params: { q: query, session_id: sessionId },

@@ -1,5 +1,6 @@
 // server/server.js
 const express = require("express");
+const adminRoutes = require("./routes/admin");
 const mysql = require("mysql2");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
@@ -21,6 +22,13 @@ app.use(assistantRouter);
 const supervisorMatchingRouter = require("./routes/supervisorMatching");
 app.use(supervisorMatchingRouter);
 
+function shouldUseSsl() {
+  return (
+    process.env.DB_SSL === "true" ||
+    String(process.env.DB_HOST || "").includes("aivencloud.com")
+  );
+}
+
 // Database Connection
 const db = mysql.createPool({
   host: process.env.DB_HOST,
@@ -30,10 +38,51 @@ const db = mysql.createPool({
   database: process.env.DB_NAME,
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0
+  queueLimit: 0,
+  ssl: shouldUseSsl()
+    ? {
+        rejectUnauthorized: false,
+      }
+    : undefined,
 });
 
 console.log("Connected to database.");
+
+function ensureAdminTable() {
+  db.query(
+    `CREATE TABLE IF NOT EXISTS admin (
+      user_id INT NOT NULL PRIMARY KEY,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`,
+    (err) => {
+      if (err) console.error("Failed to ensure admin table:", err.message);
+    }
+  );
+}
+
+ensureAdminTable();
+
+function verifyAdmin(req, res, next) {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+  if (!token) {
+    return res.status(401).json({ error: "Missing admin token" });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET || "ifamous-super-secret-key-2026");
+
+    if (decoded.is_admin === 1 || decoded.email === "admin@utm.my") {
+      req.adminUser = decoded;
+      return next();
+    }
+
+    return res.status(403).json({ error: "Admin access required" });
+  } catch (error) {
+    return res.status(401).json({ error: "Invalid or expired token" });
+  }
+}
 
 // Status API Endpoint
 app.get("/api/status", (req, res) => {
@@ -54,36 +103,123 @@ app.post("/api/signup", async (req, res) => {
     companyName,
     expertise,
     affiliation,
+    metricNumber,
+    cgpa,
+    totalCreditHour,
+    creditHourProofName,
+    workloadCapacity,
   } = req.body;
 
+  if (!email || !password || !fullName || !phoneNumber) {
+    return res.status(400).json({
+      error: "Missing required fields",
+      details: "Full name, email, phone number, and password are required.",
+    });
+  }
+
+  const normalizedEmail = String(email).trim().toLowerCase();
+  const isStudentEmail = normalizedEmail.endsWith("@graduate.utm.my");
+  const isStaffEmail = normalizedEmail.endsWith("@utm.my") && !isStudentEmail;
+
+  if (isStudentEmail) {
+    if (!metricNumber || cgpa === null || cgpa === undefined || !totalCreditHour || !creditHourProofName) {
+      return res.status(400).json({
+        error: "Missing student details",
+        details: "Student signup requires metric number, CGPA, completed credit hours, and proof of credit hours.",
+      });
+    }
+  }
+
+  if (isStaffEmail && !expertise) {
+    return res.status(400).json({
+      error: "Missing staff expertise",
+      details: "UTM staff signup requires at least one expertise area.",
+    });
+  }
+
+  const connection = await db.promise().getConnection();
+
   try {
-    //pepper added to password for security
-    const pepper = process.env.SECRET_PEPPER;
+    const pepper = process.env.SECRET_PEPPER || "";
     const hashedPassword = await bcrypt.hash(password + pepper, 10);
 
-    const sql = "CALL sp_signup_normal_user(?, ?, ?, ?, ?, ?, ?)";
-    const values = [
-      email,
+    await connection.beginTransaction();
+
+    await connection.query("CALL sp_signup_normal_user(?, ?, ?, ?, ?, ?, ?)", [
+      normalizedEmail,
       hashedPassword,
       fullName,
       phoneNumber,
       companyName || null,
       expertise || null,
       affiliation || null,
-    ];
+    ]);
 
-    db.query(sql, values, (err, results) => {
-      if (err) {
-        console.error("Signup error:", err);
-        return res
-          .status(500)
-          .json({ error: "Registration failed", details: err.message });
-      }
-      res.json({ message: "User registered successfully", results });
+    const [userRows] = await connection.query(
+      "SELECT user_id, email, full_name FROM users WHERE email = ? LIMIT 1",
+      [normalizedEmail]
+    );
+
+    if (!userRows || userRows.length === 0) {
+      throw new Error("User was created but could not be found for role assignment.");
+    }
+
+    const createdUser = userRows[0];
+
+    if (isStudentEmail) {
+      await connection.query(
+        `INSERT INTO students
+          (student_id, metric_number, CGPA, proof_of_credit_hours, credit_hours_completed)
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+          metric_number = VALUES(metric_number),
+          CGPA = VALUES(CGPA),
+          proof_of_credit_hours = VALUES(proof_of_credit_hours),
+          credit_hours_completed = VALUES(credit_hours_completed)`,
+        [
+          createdUser.user_id,
+          String(metricNumber).trim().toUpperCase(),
+          Number(cgpa),
+          creditHourProofName || "Proof uploaded during signup",
+          Number(totalCreditHour),
+        ]
+      );
+    }
+
+    if (isStaffEmail) {
+      const capacity = Number(workloadCapacity || 5);
+
+      await connection.query(
+        `INSERT INTO supervisor
+          (research_expertise, sv_capacity, current_capacity, supervisor_id)
+         VALUES (?, ?, 0, ?)
+         ON DUPLICATE KEY UPDATE
+          research_expertise = VALUES(research_expertise),
+          sv_capacity = VALUES(sv_capacity)`,
+        [expertise || "General academic supervision", capacity, createdUser.user_id]
+      );
+    }
+
+    await connection.commit();
+
+    res.json({
+      message: isStudentEmail
+        ? "Student account registered successfully."
+        : isStaffEmail
+          ? "UTM staff/supervisor account registered successfully."
+          : "External user registered successfully.",
+      user_id: createdUser.user_id,
+      role: isStudentEmail ? "Student" : isStaffEmail ? "Supervisor" : "External",
     });
-  } catch (hashError) {
-    console.error("Password hashing error:", hashError);
-    return res.status(500).json({ error: "Server error during registration" });
+  } catch (error) {
+    await connection.rollback();
+    console.error("Signup error:", error);
+    return res.status(500).json({
+      error: "Registration failed",
+      details: error.message,
+    });
+  } finally {
+    connection.release();
   }
 });
 
@@ -95,60 +231,88 @@ app.post("/api/login", (req, res) => {
     return res.status(400).json({ error: "Email and password are required" });
   }
 
-  const sql = "SELECT * FROM `ifamous_dbms`.`users` WHERE email = ?";
-  db.query(sql, [email], async (err, results) => {
+  const normalizedLogin = String(email).trim().toLowerCase();
+
+  const sql = `
+    SELECT u.*
+    FROM users u
+    LEFT JOIN students s ON s.student_id = u.user_id
+    WHERE LOWER(u.email) = ? OR LOWER(s.metric_number) = ?
+    LIMIT 1
+  `;
+
+  db.query(sql, [normalizedLogin, normalizedLogin], async (err, results) => {
     if (err) {
       console.error("Login error:", err);
       return res.status(500).json({ error: "Database error during login" });
     }
 
     if (results.length === 0) {
-      return res.status(401).json({ error: "Invalid email or password" });
+      return res.status(401).json({ error: "Invalid email/metric number or password" });
     }
 
     const user = results[0];
 
     try {
-      const pepper = process.env.SECRET_PEPPER;
+      const pepper = process.env.SECRET_PEPPER || "";
       const match = await bcrypt.compare(password + pepper, user.password_hash);
       if (!match) {
-        return res.status(401).json({ error: "Invalid email or password" });
+        return res.status(401).json({ error: "Invalid email/metric number or password" });
       }
 
-      // Successful login
       delete user.password_hash;
 
-      // Call sp_lookup_user_role
-      const roleSql = "CALL sp_lookup_user_role(?, ?)";
-      db.query(roleSql, [user.email, user.user_id], (roleErr, roleResults) => {
-        if (roleErr) {
-          console.error("Role lookup error:", roleErr);
-          // If the procedure fails, we still might want to let them login, or fail strictly
-          return res.status(500).json({ error: "Database error during role lookup" });
+      const roleSql = `
+        SELECT
+          EXISTS(SELECT 1 FROM students WHERE student_id = ?) AS is_student,
+          EXISTS(SELECT 1 FROM supervisor WHERE supervisor_id = ?) AS is_supervisor,
+          EXISTS(SELECT 1 FROM examiners WHERE examiners_id = ?) AS is_examiner,
+          EXISTS(SELECT 1 FROM coordinator WHERE user_id = ?) AS is_coordinator,
+          EXISTS(SELECT 1 FROM admin WHERE user_id = ?) AS is_admin
+      `;
+
+      db.query(
+        roleSql,
+        [user.user_id, user.user_id, user.user_id, user.user_id, user.user_id],
+        (roleErr, roleResults) => {
+          if (roleErr) {
+            console.error("Role lookup error:", roleErr);
+            return res.status(500).json({ error: "Database error during role lookup" });
+          }
+
+          const roles = roleResults?.[0] || {};
+          user.is_student = Number(roles.is_student || 0);
+          user.is_supervisor = Number(roles.is_supervisor || 0);
+          user.is_examiner = Number(roles.is_examiner || 0);
+          user.is_coordinator = Number(roles.is_coordinator || 0);
+          user.is_admin = Number(roles.is_admin || 0);
+
+          if (String(user.email).toLowerCase() === "admin@utm.my") {
+            user.is_admin = 1;
+          }
+
+          user.role_info = {
+            is_student: user.is_student,
+            is_supervisor: user.is_supervisor,
+            is_examiner: user.is_examiner,
+            is_coordinator: user.is_coordinator,
+            is_admin: user.is_admin,
+          };
+
+          const token = jwt.sign(
+            {
+              user_id: user.user_id,
+              email: user.email,
+              is_admin: user.is_admin,
+              is_coordinator: user.is_coordinator,
+            },
+            JWT_SECRET || "ifamous-super-secret-key-2026",
+            { expiresIn: "24h" }
+          );
+
+          res.json({ message: "Login successful", user, token });
         }
-        // Debug: Log what the database actually returned
-        console.log("Procedure Results:", JSON.stringify(roleResults));
-
-        // Attach the role information directly to the user object
-        if (roleResults && roleResults[0] && roleResults[0].length > 0) {
-          const roles = roleResults[0][0];
-          user.is_student = roles.is_student;
-          user.is_supervisor = roles.is_supervisor;
-          user.is_examiner = roles.is_examiner;
-          user.is_coordinator = roles.is_coordinator;
-          user.role_info = roles; // Keep this just in case
-        } else {
-          console.warn("WARNING: sp_lookup_user_role returned 0 rows for email:", user.email);
-        }
-
-        const token = jwt.sign(
-          { user_id: user.user_id, is_coordinator: user.is_coordinator },
-          JWT_SECRET || "ifamous-super-secret-key-2026",
-          { expiresIn: "24h" }
-        );
-
-        res.json({ message: "Login successful", user, token });
-      });
+      );
     } catch (compareError) {
       console.error("Password comparison error:", compareError);
       return res.status(500).json({ error: "Server error during login" });
@@ -910,19 +1074,27 @@ app.delete("/api/users/:id", (req, res) => {
   });
 });
 
-app.post("/api/users", (req, res) => {
+app.post("/api/users", async (req, res) => {
   const { email, password, full_name, phone_number, co_org_name, expertise, affiliation } = req.body;
   if (!email || !password || !full_name) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
-  // Uses sp_signup_normal_user (email, password_hash, full_name, phone_number, co_org_name, expertise, affiliation)
-  db.query("CALL sp_signup_normal_user(?, ?, ?, ?, ?, ?, ?)",
-    [email, password, full_name, phone_number || null, co_org_name || null, expertise || null, affiliation || null],
-    (err, results) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: "User created successfully" });
-    });
+  try {
+    const pepper = process.env.SECRET_PEPPER || "";
+    const hashedPassword = await bcrypt.hash(password + pepper, 10);
+
+    db.query(
+      "CALL sp_signup_normal_user(?, ?, ?, ?, ?, ?, ?)",
+      [email, hashedPassword, full_name, phone_number || null, co_org_name || null, expertise || null, affiliation || null],
+      (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ message: "User created successfully" });
+      }
+    );
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.put("/api/users/:id", (req, res) => {
@@ -980,5 +1152,158 @@ app.get("/api/classes/search", (req, res) => {
     res.json(results);
   });
 });
+
+
+// --- ADMIN USER/ROLE MANAGEMENT APIs ---
+app.get("/api/admin/users", verifyAdmin, (req, res) => {
+  const sql = `
+    SELECT
+      u.user_id,
+      u.email,
+      u.full_name,
+      u.phone_number,
+      u.affiliation,
+      u.expertise,
+      s.metric_number,
+      s.CGPA,
+      s.proof_of_credit_hours,
+      s.credit_hours_completed,
+      sv.research_expertise,
+      sv.sv_capacity,
+      sv.current_capacity,
+      ex.industry_background,
+      IF(a.user_id IS NULL, 0, 1) AS is_admin,
+      IF(c.user_id IS NULL, 0, 1) AS is_coordinator,
+      IF(s.student_id IS NULL, 0, 1) AS is_student,
+      IF(sv.supervisor_id IS NULL, 0, 1) AS is_supervisor,
+      IF(ex.examiners_id IS NULL, 0, 1) AS is_examiner
+    FROM users u
+    LEFT JOIN admin a ON a.user_id = u.user_id
+    LEFT JOIN coordinator c ON c.user_id = u.user_id
+    LEFT JOIN students s ON s.student_id = u.user_id
+    LEFT JOIN supervisor sv ON sv.supervisor_id = u.user_id
+    LEFT JOIN examiners ex ON ex.examiners_id = u.user_id
+    ORDER BY u.full_name ASC
+  `;
+
+  db.query(sql, (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ users: rows || [] });
+  });
+});
+
+app.put("/api/admin/users/:id/roles", verifyAdmin, async (req, res) => {
+  const userId = Number(req.params.id);
+  const {
+    is_admin,
+    is_coordinator,
+    is_supervisor,
+    is_examiner,
+    is_student,
+    metric_number,
+    cgpa,
+    credit_hours_completed,
+    proof_of_credit_hours,
+    research_expertise,
+    sv_capacity,
+    industry_background,
+  } = req.body;
+
+  const connection = await db.promise().getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    if (is_admin) {
+      await connection.query("INSERT IGNORE INTO admin (user_id) VALUES (?)", [userId]);
+    } else {
+      await connection.query("DELETE FROM admin WHERE user_id = ?", [userId]);
+    }
+
+    if (is_coordinator) {
+      await connection.query("INSERT IGNORE INTO coordinator (user_id) VALUES (?)", [userId]);
+    } else {
+      await connection.query("DELETE FROM coordinator WHERE user_id = ?", [userId]);
+    }
+
+    if (is_student) {
+      await connection.query(
+        `INSERT INTO students
+          (student_id, metric_number, CGPA, proof_of_credit_hours, credit_hours_completed)
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+          metric_number = VALUES(metric_number),
+          CGPA = VALUES(CGPA),
+          proof_of_credit_hours = VALUES(proof_of_credit_hours),
+          credit_hours_completed = VALUES(credit_hours_completed)`,
+        [
+          userId,
+          String(metric_number || `STU${userId}`).trim().toUpperCase(),
+          Number(cgpa || 0),
+          proof_of_credit_hours || "Updated by admin",
+          Number(credit_hours_completed || 0),
+        ]
+      );
+    } else {
+      await connection.query("DELETE FROM students WHERE student_id = ?", [userId]);
+    }
+
+    if (is_supervisor) {
+      await connection.query(
+        `INSERT INTO supervisor
+          (research_expertise, sv_capacity, current_capacity, supervisor_id)
+         VALUES (?, ?, 0, ?)
+         ON DUPLICATE KEY UPDATE
+          research_expertise = VALUES(research_expertise),
+          sv_capacity = VALUES(sv_capacity)`,
+        [research_expertise || "General academic supervision", Number(sv_capacity || 5), userId]
+      );
+    } else {
+      await connection.query("DELETE FROM supervisor WHERE supervisor_id = ?", [userId]);
+    }
+
+    if (is_examiner) {
+      await connection.query(
+        `INSERT INTO examiners (industry_background, examiners_id)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE industry_background = VALUES(industry_background)`,
+        [industry_background || "Academic examiner", userId]
+      );
+    } else {
+      await connection.query("DELETE FROM examiners WHERE examiners_id = ?", [userId]);
+    }
+
+    await connection.commit();
+    res.json({ message: "Roles updated successfully" });
+  } catch (error) {
+    await connection.rollback();
+    res.status(500).json({ error: error.message });
+  } finally {
+    connection.release();
+  }
+});
+
+app.put("/api/admin/users/:id/password", verifyAdmin, async (req, res) => {
+  const userId = Number(req.params.id);
+  const { newPassword } = req.body;
+
+  if (!newPassword || String(newPassword).length < 6) {
+    return res.status(400).json({ error: "New password must be at least 6 characters" });
+  }
+
+  try {
+    const pepper = process.env.SECRET_PEPPER || "";
+    const hashedPassword = await bcrypt.hash(String(newPassword) + pepper, 10);
+
+    db.query("UPDATE users SET password_hash = ? WHERE user_id = ?", [hashedPassword, userId], (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ message: "Password reset successfully" });
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.use("/api/admin", adminRoutes);
 
 app.listen(3000, () => console.log("Backend running on port 3000"));

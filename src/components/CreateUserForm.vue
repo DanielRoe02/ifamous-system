@@ -21,17 +21,35 @@ const form = ref({
 const expertiseTags = ref([])
 const expertiseInput = ref('')
 
+const commitExpertiseInput = () => {
+  const parts = expertiseInput.value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+  parts.forEach((item) => {
+    if (!expertiseTags.value.includes(item)) {
+      expertiseTags.value.push(item)
+    }
+  })
+
+  expertiseInput.value = ''
+}
+
 const addTag = (event) => {
   if (event.key === 'Enter' || event.key === ',') {
     event.preventDefault()
+    commitExpertiseInput()
+  }
+}
 
-    const val = expertiseInput.value.trim().replace(/,$/, '')
+const handleExpertisePaste = (event) => {
+  const pastedText = event.clipboardData?.getData('text') || ''
 
-    if (val && !expertiseTags.value.includes(val)) {
-      expertiseTags.value.push(val)
-    }
-
-    expertiseInput.value = ''
+  if (pastedText.includes(',')) {
+    event.preventDefault()
+    expertiseInput.value = pastedText
+    commitExpertiseInput()
   }
 }
 
@@ -302,6 +320,8 @@ const submitForm = async () => {
           <input
             v-model="expertiseInput"
             @keydown="addTag"
+            @blur="commitExpertiseInput"
+            @paste="handleExpertisePaste"
             type="text"
             placeholder="Type tag and press Enter"
             class="flex-1 min-w-[150px] outline-none bg-transparent"

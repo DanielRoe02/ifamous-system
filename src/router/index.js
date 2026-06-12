@@ -12,6 +12,19 @@ const router = createRouter({
       name: 'signup',
       component: () => import('../views/auth/SignupView.vue'),
     },
+
+    {
+      path: '/admin-dashboard',
+      name: 'admin-dashboard',
+      component: () => import('../views/admin/AdminDashboardView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/admin-users',
+      name: 'admin-users',
+      component: () => import('../views/admin/AdminManageUsersView.vue'),
+      meta: { requiresAuth: true },
+    },
     {
       path: '/dashboard',
       name: 'dashboard',
@@ -60,21 +73,82 @@ const router = createRouter({
       component: () => import('../views/coordinator/ManageFYPView.vue'),
       meta: { requiresAuth: true },
     },
+
+    {
+      path: '/student-dashboard',
+      name: 'student-dashboard',
+      component: () => import('../views/student/StudentDashboardView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/student-fyp',
+      name: 'student-fyp',
+      component: () => import('../views/student/StudentMyFYPView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/student-logbook',
+      name: 'student-logbook',
+      component: () => import('../views/student/StudentLogbookView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/student-submissions',
+      redirect: '/student-fyp',
+    },
+    {
+      path: '/student-project-details',
+      name: 'student-project-details',
+      component: () => import('../views/student/StudentProjectDetailsView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/supervisor-dashboard',
+      name: 'supervisor-dashboard',
+      component: () => import('../views/supervisor/SupervisorDashboardView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/supervisor-projects',
+      name: 'supervisor-projects',
+      component: () => import('../views/supervisor/SupervisorProjectsView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/supervisor-review',
+      name: 'supervisor-review',
+      component: () => import('../views/supervisor/SupervisorReviewView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/supervisor-logbook',
+      name: 'supervisor-logbook',
+      component: () => import('../views/supervisor/SupervisorLogbookView.vue'),
+      meta: { requiresAuth: true },
+    },
   ],
 })
 
 // Route Guard for Authentication
+const getDefaultRouteForUser = () => {
+  const session = JSON.parse(localStorage.getItem('userSession') || 'null')
+
+  if (Number(session?.is_admin) === 1) return '/admin-dashboard'
+  if (Number(session?.is_coordinator) === 1) return '/dashboard'
+  if (Number(session?.is_supervisor) === 1) return '/supervisor-dashboard'
+  if (Number(session?.is_student) === 1) return '/student-dashboard'
+
+  return '/dashboard'
+}
+
 router.beforeEach((to, from, next) => {
   const isAuthenticated = !!localStorage.getItem('userSession')
 
   if (to.meta.requiresAuth && !isAuthenticated) {
-    // If the route requires auth and user is not logged in, redirect to login
     next({ name: 'login' })
   } else if (to.name === 'login' && isAuthenticated) {
-    // If the user is already logged in and tries to access login page, redirect to dashboard
-    next({ name: 'dashboard' })
+    next(getDefaultRouteForUser())
   } else {
-    // Proceed normally
     next()
   }
 })

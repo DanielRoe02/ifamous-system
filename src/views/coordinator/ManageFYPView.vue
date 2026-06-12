@@ -34,7 +34,7 @@ const router = useRouter()
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
-const activeTab = ref('upload')
+const activeTab = ref('queue')
 
 const isExtracting = ref(false)
 const isMatching = ref(false)
@@ -412,8 +412,7 @@ onMounted(() => {
               </div>
 
               <p class="text-white/80 max-w-3xl text-[16px] leading-relaxed">
-                Upload individual or group proposal files, extract project members, run AI
-                supervisor matching, assign a supervisor, and track assigned projects.
+                Review student-submitted proposal records, run AI supervisor matching, assign supervisors and examiners, and monitor project status.
               </p>
             </div>
 
@@ -444,9 +443,9 @@ onMounted(() => {
               <UploadCloud class="w-7 h-7 text-[#f8be17]" />
             </div>
             <p class="text-gray-500 font-semibold mt-5">Step 1</p>
-            <h3 class="text-xl font-bold text-black mt-1">Upload Proposal</h3>
+            <h3 class="text-xl font-bold text-black mt-1">Proposal Queue</h3>
             <p class="text-sm text-gray-500 mt-2">
-              Upload .txt, .docx, or text-based .pdf proposal file.
+              Review proposal files submitted by students.
             </p>
           </div>
 
@@ -468,7 +467,7 @@ onMounted(() => {
             <p class="text-gray-500 font-semibold mt-5">Step 3</p>
             <h3 class="text-xl font-bold text-black mt-1">Assign Supervisor</h3>
             <p class="text-sm text-gray-500 mt-2">
-              Coordinator confirms the recommended supervisor.
+              Coordinator confirms the recommended supervisor and examiner.
             </p>
           </div>
 
@@ -479,7 +478,7 @@ onMounted(() => {
             <p class="text-gray-500 font-semibold mt-5">Step 4</p>
             <h3 class="text-xl font-bold text-black mt-1">Track Records</h3>
             <p class="text-sm text-gray-500 mt-2">
-              Assigned project records are saved into Aiven MySQL.
+              Assignment and approval status are monitored from one workspace.
             </p>
           </div>
         </section>
@@ -490,16 +489,16 @@ onMounted(() => {
           <div class="bg-[#f7f1ea] px-7 pt-7 border-b border-[#e1d5cc]">
             <div class="flex flex-wrap gap-3">
               <button
-                @click="setActiveTab('upload')"
+                @click="setActiveTab('queue')"
                 :class="[
                   'px-5 py-3 rounded-t-[18px] font-bold flex items-center gap-2 transition-colors',
-                  activeTab === 'upload'
+                  activeTab === 'queue'
                     ? 'bg-[#5c001f] text-white'
                     : 'bg-white text-[#5c001f] hover:bg-[#fff8df]',
                 ]"
               >
                 <UploadCloud class="w-5 h-5" />
-                Upload Proposal
+                Submitted Proposal Queue
               </button>
 
               <button
@@ -543,224 +542,97 @@ onMounted(() => {
             </div>
           </div>
 
-          <!-- Upload Tab -->
-          <div v-if="activeTab === 'upload'" class="p-7 grid grid-cols-1 2xl:grid-cols-3 gap-7">
-            <!-- Upload Area -->
-            <div class="2xl:col-span-1">
-              <div
-                class="h-full rounded-[26px] border-2 border-dashed border-[#d4bfae] bg-[#f7f1ea] p-7 flex flex-col items-center justify-center text-center"
+          <!-- Submitted Proposal Queue Tab -->
+          <div v-if="activeTab === 'queue'" class="p-7">
+            <div class="flex items-center justify-between gap-4 mb-6">
+              <div>
+                <p class="text-sm font-bold text-[#5c001f] uppercase tracking-[0.18em]">
+                  Coordinator Review
+                </p>
+                <h2 class="text-[28px] font-bold">Submitted Proposal Queue</h2>
+                <p class="text-gray-600 mt-2 max-w-3xl">
+                  Proposals are uploaded by students from the Student Document Submission Center.
+                  Coordinator reviews each proposal, runs AI matching, and assigns the most suitable supervisor.
+                </p>
+              </div>
+
+              <button
+                @click="fillSampleProposal"
+                class="bg-[#fff3c4] text-[#5c001f] px-5 py-2.5 rounded-full font-bold hover:bg-[#f8be17] transition-colors border-none flex items-center gap-2"
               >
-                <div
-                  class="w-20 h-20 rounded-[26px] bg-[#5c001f] flex items-center justify-center shadow-md"
-                >
-                  <UploadCloud class="w-10 h-10 text-[#f8be17]" />
-                </div>
+                <Sparkles class="w-4 h-4" />
+                Load Demo Proposal
+              </button>
+            </div>
 
-                <h3 class="text-2xl font-bold mt-5">Upload Proposal File</h3>
-                <p class="text-gray-600 mt-2 text-sm leading-relaxed">
-                  Upload Word, PDF, or text proposal. The system extracts project members,
-                  title, abstract, and keywords automatically.
-                </p>
-
-                <label
-                  class="mt-6 bg-[#5c001f] text-white px-6 py-3 rounded-full font-bold hover:bg-[#4a0019] transition-colors cursor-pointer flex items-center gap-2"
-                  :class="{ 'opacity-60 cursor-not-allowed': isExtracting }"
-                >
-                  <Loader2 v-if="isExtracting" class="w-5 h-5 text-[#f8be17] animate-spin" />
-                  <FileText v-else class="w-5 h-5" />
-                  {{ isExtracting ? 'Extracting...' : 'Choose File' }}
-                  <input
-                    type="file"
-                    class="hidden"
-                    accept=".pdf,.docx,.txt"
-                    :disabled="isExtracting"
-                    @change="handleFileUpload"
-                  />
-                </label>
-
-                <p v-if="selectedFileName" class="mt-4 text-sm font-bold text-[#5c001f]">
-                  Selected: {{ selectedFileName }}
-                </p>
-
-                <div
-                  v-if="extractSuccess"
-                  class="mt-5 w-full rounded-[18px] bg-green-50 border border-green-200 p-4 text-left"
-                >
-                  <div class="flex gap-3">
-                    <CheckCircle2 class="w-5 h-5 text-green-700 shrink-0" />
-                    <div>
-                      <p class="text-sm font-bold text-green-700">Extraction Complete</p>
-                      <p class="text-xs text-green-700 mt-1">{{ extractSuccess }}</p>
-                      <p class="text-xs text-green-700 mt-1">
-                        Source:
-                        {{ extractionSource === 'groq' ? 'Groq AI' : 'Fallback extraction' }}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div
-                  v-if="extractError"
-                  class="mt-5 w-full rounded-[18px] bg-red-50 border border-red-200 p-4 text-left"
-                >
-                  <div class="flex gap-3">
-                    <AlertTriangle class="w-5 h-5 text-red-700 shrink-0" />
-                    <div>
-                      <p class="text-sm font-bold text-red-700">Extraction Failed</p>
-                      <p class="text-xs text-red-700 mt-1">{{ extractError }}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="mt-8 w-full rounded-[20px] bg-white border border-[#e1d5cc] p-4">
-                  <p class="text-sm font-bold text-[#5c001f]">Supported Files</p>
-                  <p class="text-xs text-gray-600 mt-1">
-                    .txt, .docx, and text-based .pdf. Scanned PDF needs OCR later.
-                  </p>
-                </div>
+            <div class="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-7">
+              <div class="rounded-[24px] bg-[#f7f1ea] border border-[#e1d5cc] p-6">
+                <p class="text-sm text-gray-500 font-bold">Submitted Proposals</p>
+                <p class="text-[34px] font-bold text-[#5c001f] mt-1">12</p>
+                <p class="text-xs text-gray-500 mt-1">Waiting in coordinator queue</p>
+              </div>
+              <div class="rounded-[24px] bg-[#f7f1ea] border border-[#e1d5cc] p-6">
+                <p class="text-sm text-gray-500 font-bold">Pending AI Matching</p>
+                <p class="text-[34px] font-bold text-[#5c001f] mt-1">8</p>
+                <p class="text-xs text-gray-500 mt-1">Ready for supervisor recommendation</p>
+              </div>
+              <div class="rounded-[24px] bg-[#f7f1ea] border border-[#e1d5cc] p-6">
+                <p class="text-sm text-gray-500 font-bold">Pending Supervisor Approval</p>
+                <p class="text-[34px] font-bold text-[#5c001f] mt-1">3</p>
+                <p class="text-xs text-gray-500 mt-1">Assigned but waiting response</p>
               </div>
             </div>
 
-            <!-- Form Area -->
-            <div class="2xl:col-span-2">
-              <div class="rounded-[26px] border border-[#e1d5cc] p-7">
-                <div class="flex items-center justify-between gap-4 mb-6">
-                  <div>
-                    <p class="text-sm font-bold text-[#5c001f] uppercase tracking-[0.18em]">
-                      Proposal Information
-                    </p>
-                    <h2 class="text-[28px] font-bold mt-1">Project Details</h2>
-                  </div>
-
-                  <button
-                    @click="fillSampleProposal"
-                    class="bg-[#fff3c4] text-[#5c001f] px-5 py-2.5 rounded-full font-bold hover:bg-[#f8be17] transition-colors border-none flex items-center gap-2"
-                  >
-                    <Sparkles class="w-4 h-4" />
-                    Demo Fill
-                  </button>
-                </div>
-
-                <!-- Project Members -->
-                <div class="rounded-[24px] bg-[#f7f1ea] border border-[#e1d5cc] p-5 mb-6">
-                  <div class="flex items-center justify-between gap-4 mb-4">
-                    <div>
-                      <p class="text-sm font-bold text-[#5c001f] uppercase tracking-[0.18em]">
-                        Project Members
-                      </p>
-                      <p class="text-sm text-gray-600 mt-1">
-                        Supports individual and group FYP proposals.
-                      </p>
-                    </div>
-
-                    <button
-                      @click="addMember"
-                      class="bg-[#5c001f] text-white px-4 py-2 rounded-full font-bold hover:bg-[#4a0019] transition-colors border-none flex items-center gap-2"
-                    >
-                      <Plus class="w-4 h-4 text-[#f8be17]" />
-                      Add Member
-                    </button>
-                  </div>
-
-                  <div v-if="proposalForm.members.length === 0" class="text-sm text-gray-500">
-                    No members extracted yet. Upload a proposal or add members manually.
-                  </div>
-
-                  <div v-else class="space-y-3">
-                    <div
-                      v-for="(member, index) in proposalForm.members"
-                      :key="index"
-                      class="grid grid-cols-1 xl:grid-cols-[1fr_220px_45px] gap-3 items-center"
-                    >
-                      <input
-                        v-model="member.name"
-                        @input="updateMemberText"
-                        type="text"
-                        placeholder="Member name"
-                        class="w-full rounded-[16px] border border-[#d8c9bd] px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#f8be17]"
-                      />
-
-                      <input
-                        v-model="member.matricNo"
-                        @input="updateMemberText"
-                        type="text"
-                        placeholder="Matric No"
-                        class="w-full rounded-[16px] border border-[#d8c9bd] px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#f8be17]"
-                      />
-
-                      <button
-                        @click="removeMember(index)"
-                        class="w-11 h-11 rounded-[14px] bg-red-50 text-red-700 hover:bg-red-100 flex items-center justify-center"
-                      >
-                        <Trash2 class="w-5 h-5" />
+            <div class="overflow-x-auto rounded-[24px] border border-[#e1d5cc]">
+              <table class="w-full text-sm bg-white">
+                <thead class="bg-[#5c001f] text-white">
+                  <tr class="text-left">
+                    <th class="px-5 py-4">Student / Members</th>
+                    <th class="px-5 py-4">Project Title</th>
+                    <th class="px-5 py-4">Proposal Status</th>
+                    <th class="px-5 py-4">AI Status</th>
+                    <th class="px-5 py-4">Supervisor</th>
+                    <th class="px-5 py-4 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="border-b border-[#eee3db] hover:bg-[#fffaf0]">
+                    <td class="px-5 py-4 font-bold">Ahmad Daniel<br /><span class="text-xs text-gray-500 font-medium">A24MJ5074</span></td>
+                    <td class="px-5 py-4">Smart Academic Advisor Audit System</td>
+                    <td class="px-5 py-4"><span class="px-3 py-1 rounded-full bg-[#fff3c4] text-[#5c001f] font-bold text-xs">Proposal Submitted</span></td>
+                    <td class="px-5 py-4"><span class="px-3 py-1 rounded-full bg-blue-100 text-blue-700 font-bold text-xs">Pending AI Matching</span></td>
+                    <td class="px-5 py-4">Not Assigned</td>
+                    <td class="px-5 py-4 text-right">
+                      <button @click="fillSampleProposal(); setActiveTab('matching')" class="bg-[#5c001f] text-white px-4 py-2 rounded-full font-bold hover:bg-[#4a0019]">
+                        Review / Run AI
                       </button>
-                    </div>
-                  </div>
-                </div>
+                    </td>
+                  </tr>
+                  <tr class="border-b border-[#eee3db] hover:bg-[#fffaf0]">
+                    <td class="px-5 py-4 font-bold">Nur Syafiqah<br /><span class="text-xs text-gray-500 font-medium">A24MJ5081</span></td>
+                    <td class="px-5 py-4">AI-Based Attendance Monitoring System</td>
+                    <td class="px-5 py-4"><span class="px-3 py-1 rounded-full bg-[#fff3c4] text-[#5c001f] font-bold text-xs">Proposal Submitted</span></td>
+                    <td class="px-5 py-4"><span class="px-3 py-1 rounded-full bg-purple-100 text-purple-700 font-bold text-xs">AI Completed</span></td>
+                    <td class="px-5 py-4">Ts. Dr. Wong Mei Ling</td>
+                    <td class="px-5 py-4 text-right"><button @click="setActiveTab('records')" class="bg-[#fff3c4] text-[#5c001f] px-4 py-2 rounded-full font-bold">View Status</button></td>
+                  </tr>
+                  <tr class="hover:bg-[#fffaf0]">
+                    <td class="px-5 py-4 font-bold">Lim Wei Sheng<br /><span class="text-xs text-gray-500 font-medium">A24MJ5092</span></td>
+                    <td class="px-5 py-4">Mobile Learning Platform</td>
+                    <td class="px-5 py-4"><span class="px-3 py-1 rounded-full bg-green-100 text-green-700 font-bold text-xs">Supervisor Approved</span></td>
+                    <td class="px-5 py-4"><span class="px-3 py-1 rounded-full bg-purple-100 text-purple-700 font-bold text-xs">AI Completed</span></td>
+                    <td class="px-5 py-4">Dr. David Kumar</td>
+                    <td class="px-5 py-4 text-right"><button @click="setActiveTab('records')" class="bg-[#fff3c4] text-[#5c001f] px-4 py-2 rounded-full font-bold">View Record</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
 
-                <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
-                  <div>
-                    <label class="block text-sm font-bold text-gray-700 mb-2">Project Type</label>
-                    <select
-                      v-model="proposalForm.projectType"
-                      class="w-full rounded-[16px] border border-[#d8c9bd] px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#f8be17]"
-                    >
-                      <option>Development</option>
-                      <option>Research</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label class="block text-sm font-bold text-gray-700 mb-2">Keywords</label>
-                    <input
-                      v-model="proposalForm.keywords"
-                      type="text"
-                      placeholder="AI, IoT, Web, Database"
-                      class="w-full rounded-[16px] border border-[#d8c9bd] px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#f8be17]"
-                    />
-                  </div>
-                </div>
-
-                <div class="mt-5">
-                  <label class="block text-sm font-bold text-gray-700 mb-2">Project Title</label>
-                  <input
-                    v-model="proposalForm.projectTitle"
-                    type="text"
-                    placeholder="Enter FYP project title"
-                    class="w-full rounded-[16px] border border-[#d8c9bd] px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#f8be17]"
-                  />
-                </div>
-
-                <div class="mt-5">
-                  <label class="block text-sm font-bold text-gray-700 mb-2">
-                    Abstract / Problem Statement
-                  </label>
-                  <textarea
-                    v-model="proposalForm.abstract"
-                    rows="7"
-                    placeholder="Paste or type the proposal abstract here..."
-                    class="w-full rounded-[16px] border border-[#d8c9bd] px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#f8be17] resize-none"
-                  ></textarea>
-                </div>
-
-                <div class="mt-6 flex flex-col sm:flex-row gap-3 justify-end">
-                  <button
-                    class="bg-[#e7ded3] text-[#5c001f] px-6 py-3 rounded-full font-bold hover:bg-[#d8c9bd] transition-colors border-none flex items-center justify-center gap-2"
-                  >
-                    Save Draft
-                  </button>
-
-                  <button
-                    @click="runAIMatch"
-                    :disabled="isMatching || isExtracting"
-                    class="bg-[#5c001f] text-white px-6 py-3 rounded-full font-bold hover:bg-[#4a0019] transition-colors border-none flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
-                    <Loader2 v-if="isMatching" class="w-5 h-5 text-[#f8be17] animate-spin" />
-                    <BrainCircuit v-else class="w-5 h-5 text-[#f8be17]" />
-                    {{ isMatching ? 'Running AI Matching...' : 'Run AI Supervisor Matching' }}
-                  </button>
-                </div>
-              </div>
+            <div class="mt-6 rounded-[20px] bg-[#fff3c4] border border-[#f8be17] p-5 text-[#5c001f]">
+              <p class="font-bold">Updated workflow reminder</p>
+              <p class="text-sm mt-1">
+                Student uploads proposal first. Coordinator only reviews submitted proposals, runs AI supervisor matching, assigns supervisor/examiner, and tracks status.
+              </p>
             </div>
           </div>
 
@@ -798,8 +670,8 @@ onMounted(() => {
                       <p class="text-xs text-[#f8be17] font-bold uppercase">Matching Source</p>
                       <p class="font-semibold mt-1">
                         {{
-                          matchSource === 'groq'
-                            ? 'Groq AI'
+                          matchSource === 'ollama'
+                            ? 'Ollama Cloud'
                             : matchSource === 'fallback'
                               ? 'Fallback Similarity'
                               : 'Demo'
@@ -820,10 +692,10 @@ onMounted(() => {
                   </div>
 
                   <button
-                    @click="setActiveTab('upload')"
+                    @click="setActiveTab('queue')"
                     class="bg-[#e7ded3] text-[#5c001f] px-5 py-2.5 rounded-full font-bold hover:bg-[#d8c9bd] transition-colors"
                   >
-                    Edit Proposal
+                    Back to Proposal Queue
                   </button>
                 </div>
 
@@ -1135,10 +1007,10 @@ onMounted(() => {
                   </button>
 
                   <button
-                    @click="setActiveTab('upload')"
+                    @click="setActiveTab('queue')"
                     class="bg-[#e7ded3] text-[#5c001f] px-7 py-3 rounded-full font-bold hover:bg-[#d8c9bd] transition-colors border-none"
                   >
-                    Upload Another Proposal
+                    Back to Proposal Queue
                   </button>
                 </div>
               </div>
