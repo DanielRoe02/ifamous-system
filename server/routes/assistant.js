@@ -8,12 +8,24 @@ const Tesseract = require('tesseract.js');
 
 const router = express.Router();
 
+function shouldUseSsl() {
+    return (
+        process.env.DB_SSL === "true" ||
+        String(process.env.DB_HOST || "").includes("aivencloud.com")
+    );
+}
+
 const db = mysql.createConnection({
     host: process.env.DB_HOST,
     port: process.env.DB_PORT || 3306,
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,
+    ssl: shouldUseSsl()
+        ? {
+              rejectUnauthorized: false,
+          }
+        : undefined,
 });
 
 const JWT_SECRET = process.env.JWT_SECRET || 'ifamous-super-secret-key-2026';
@@ -423,59 +435,55 @@ function verifyCoordinator(req, callback) {
 |--------------------------------------------------------------------------
 | AI Provider Function
 |--------------------------------------------------------------------------
-| DO NOT put your Groq API key here.
+| Uses Ollama Cloud on Render when OLLAMA_API_KEY is available.
 |
-| Put it in Render Environment Variables:
-| GROQ_API_KEY=your_real_key
-| GROQ_CHAT_MODEL=llama-3.1-8b-instant
-| GROQ_VISION_MODEL=llama-3.1-8b-instant
+| Render Environment Variables:
+| OLLAMA_API_URL=https://ollama.com
+| OLLAMA_API_KEY=your_real_ollama_key
+| OLLAMA_MODEL=gemma4:31b-cloud
+| OLLAMA_CHAT_MODEL=gemma4:31b-cloud
+| OLLAMA_VISION_MODEL=gemma4:31b-cloud
 |
 | For local testing, you may put the same variables in server/.env.
 | server/.env is ignored by Git, so it will not be uploaded to GitHub.
 |--------------------------------------------------------------------------
 */
 async function runOllama(messages, mode = 'chat') {
-    // Cloud AI for Render deployment using Groq
-    if (process.env.GROQ_API_KEY) {
-        const selectedModel =
-            mode === 'vision'
-                ? process.env.GROQ_VISION_MODEL || process.env.GROQ_CHAT_MODEL || 'llama-3.1-8b-instant'
-                : process.env.GROQ_CHAT_MODEL || 'llama-3.1-8b-instant';
-
-        const groqPayload = {
-            model: selectedModel,
-            messages,
-            temperature: 0.3,
-        };
-
-        const groqResponse = await axios.post(
-            'https://api.groq.com/openai/v1/chat/completions',
-            groqPayload,
-            {
-                headers: {
-                    Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-                    'Content-Type': 'application/json',
-                },
-            }
-        );
-
-        return groqResponse.data.choices[0].message.content;
-    }
-
-    // Local fallback for laptop development using Ollama
     const selectedModel =
         mode === 'vision'
-            ? process.env.OLLAMA_VISION_MODEL || 'moondream'
-            : process.env.OLLAMA_CHAT_MODEL || process.env.OLLAMA_MODEL || 'llama3.2:1b';
+            ? process.env.OLLAMA_VISION_MODEL || process.env.OLLAMA_MODEL || 'gemma4:31b-cloud'
+            : process.env.OLLAMA_CHAT_MODEL || process.env.OLLAMA_MODEL || 'gemma4:31b-cloud';
 
     const ollamaPayload = {
         model: selectedModel,
         stream: false,
         messages,
+        options: {
+            temperature: 0.3,
+        },
     };
 
+    // Ollama Cloud for Render deployment
+    if (process.env.OLLAMA_API_KEY) {
+        const baseUrl = process.env.OLLAMA_API_URL || 'https://ollama.com';
+
+        const ollamaCloudResponse = await axios.post(
+            `${baseUrl}/api/chat`,
+            ollamaPayload,
+            {
+                headers: {
+                    Authorization: `Bearer ${process.env.OLLAMA_API_KEY}`,
+                    'Content-Type': 'application/json',
+                },
+            }
+        );
+
+        return ollamaCloudResponse.data.message?.content || '';
+    }
+
+    // Local fallback for laptop development using local Ollama
     const ollamaResponse = await axios.post('http://localhost:11434/api/chat', ollamaPayload);
-    return ollamaResponse.data.message.content;
+    return ollamaResponse.data.message?.content || '';
 }
 
 router.post('/api/assistant/chat', async (req, res) => {

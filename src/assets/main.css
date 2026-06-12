@@ -1,10 +1,8 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 @import 'tailwindcss';
 
-* {
-  font-family: 'Inter', 'Roboto', system-ui;
-}
 :root {
-  /* Light mode neutrals from left_grid */
+  /* Light mode neutrals */
   --page-bg: #f4ebe4;
   --page-text: #333333;
   --surface-bg: #e7ded3;
@@ -12,7 +10,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    /* Dark mode grays from right_grid */
+    /* Dark mode grays */
     --page-bg: #333333;
     --page-text: #f4ebe4;
     --surface-bg: #404040;
@@ -21,23 +19,25 @@
 
 @theme {
   --font-sans: 'Inter', system-ui, sans-serif;
-  --font-heading: 'Roboto', system-ui, sans-serif;
+  --font-heading: 'Inter', system-ui, sans-serif;
 
   /* UTM Official Colors */
   --color-utm-maroon: #5c001f;
   --color-utm-dark-maroon: #2d000f;
   --color-utm-gold: #f8be17;
 
-  /* Context-aware semantic colors for Tailwind classes (e.g. bg-page-bg, text-page-text) */
+  /* Semantic colors */
   --color-page-bg: var(--page-bg);
   --color-page-text: var(--page-text);
   --color-surface-bg: var(--surface-bg);
 }
 
-body {
-  font-family: var(--font-sans);
-  background-color: var(--color-page-bg);
-  color: var(--color-page-text);
+html,
+body,
+#app {
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: var(--page-bg);
+  color: var(--page-text);
   margin: 0;
   padding: 0;
 }

@@ -8,8 +8,9 @@ const pdfParseModule = require("pdf-parse");
 
 const router = express.Router();
 
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
-const GROQ_CHAT_MODEL = process.env.GROQ_CHAT_MODEL || "llama-3.1-8b-instant";
+const OLLAMA_API_URL = process.env.OLLAMA_API_URL || "https://ollama.com";
+const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY;
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || process.env.OLLAMA_CHAT_MODEL || "gemma4:31b-cloud";
 
 const pdfParse = pdfParseModule.default || pdfParseModule;
 
@@ -178,10 +179,10 @@ function simpleFallbackMatch(project, lecturers) {
 }
 
 // ------------------------------------------------------------
-// Groq supervisor matching
+// Ollama Cloud supervisor matching
 // ------------------------------------------------------------
-async function groqSupervisorMatch(project, lecturers) {
-  if (!GROQ_API_KEY) {
+async function ollamaSupervisorMatch(project, lecturers) {
+  if (!OLLAMA_API_KEY) {
     return simpleFallbackMatch(project, lecturers);
   }
 
@@ -264,14 +265,15 @@ Rules:
 - If project involves database or academic records, prioritize Database/Information System lecturers.
 `;
 
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+  const response = await fetch(`${OLLAMA_API_URL}/api/chat`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${GROQ_API_KEY}`,
+      Authorization: `Bearer ${OLLAMA_API_KEY}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: GROQ_CHAT_MODEL,
+      model: OLLAMA_MODEL,
+      stream: false,
       messages: [
         {
           role: "system",
@@ -282,19 +284,21 @@ Rules:
           content: prompt,
         },
       ],
-      temperature: 0.2,
-      max_tokens: 1800,
+      options: {
+        temperature: 0.2,
+        num_predict: 1800,
+      },
     }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error("Groq supervisor matching error:", errorText);
+    console.error("Ollama supervisor matching error:", errorText);
     return simpleFallbackMatch(project, lecturers);
   }
 
   const data = await response.json();
-  const aiText = data.choices?.[0]?.message?.content || "";
+  const aiText = data.message?.content || "";
 
   try {
     const parsed = JSON.parse(aiText);
@@ -326,7 +330,7 @@ Rules:
         (index === 0 ? "Best Match" : index === 1 ? "Recommended" : "Alternative"),
     }));
   } catch (parseError) {
-    console.error("Failed to parse Groq JSON:", parseError);
+    console.error("Failed to parse Ollama JSON:", parseError);
     console.error("Raw AI text:", aiText);
     return simpleFallbackMatch(project, lecturers);
   }
@@ -524,12 +528,12 @@ function simpleProposalFieldExtraction(rawText) {
 }
 
 // ------------------------------------------------------------
-// Groq extraction for proposal fields
+// Ollama Cloud extraction for proposal fields
 // ------------------------------------------------------------
-async function groqExtractProposalFields(rawText) {
+async function ollamaExtractProposalFields(rawText) {
   const simple = simpleProposalFieldExtraction(rawText);
 
-  if (!GROQ_API_KEY) {
+  if (!OLLAMA_API_KEY) {
     return {
       source: "fallback",
       ...simple,
@@ -574,14 +578,15 @@ ${String(rawText || "").slice(0, 10000)}
 `;
 
   try {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    const response = await fetch(`${OLLAMA_API_URL}/api/chat`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${GROQ_API_KEY}`,
+        Authorization: `Bearer ${OLLAMA_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: GROQ_CHAT_MODEL,
+        model: OLLAMA_MODEL,
+        stream: false,
         messages: [
           {
             role: "system",
@@ -592,14 +597,16 @@ ${String(rawText || "").slice(0, 10000)}
             content: prompt,
           },
         ],
-        temperature: 0.1,
-        max_tokens: 1800,
+        options: {
+          temperature: 0.1,
+          num_predict: 1800,
+        },
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("Groq proposal extraction error:", errorText);
+      console.error("Ollama proposal extraction error:", errorText);
 
       return {
         source: "fallback",
@@ -608,14 +615,14 @@ ${String(rawText || "").slice(0, 10000)}
     }
 
     const data = await response.json();
-    const aiText = data.choices?.[0]?.message?.content || "";
+    const aiText = data.message?.content || "";
     const parsed = JSON.parse(aiText);
 
     const parsedMembers = Array.isArray(parsed.members) ? parsed.members : [];
     const finalMembers = parsedMembers.length > 0 ? parsedMembers : simple.members;
 
     return {
-      source: "groq",
+      source: "ollama",
       members: finalMembers,
       memberText: finalMembers
         .map(
@@ -632,7 +639,7 @@ ${String(rawText || "").slice(0, 10000)}
       rawText: String(rawText || ""),
     };
   } catch (error) {
-    console.error("Failed to extract proposal fields with Groq:", error);
+    console.error("Failed to extract proposal fields with Ollama:", error);
 
     return {
       source: "fallback",
@@ -700,7 +707,7 @@ router.post(
         });
       }
 
-      const extracted = await groqExtractProposalFields(rawText);
+      const extracted = await ollamaExtractProposalFields(rawText);
 
       res.json({
         success: true,
@@ -768,11 +775,11 @@ router.post("/api/supervisor-matching/match", async (req, res) => {
       ];
     }
 
-    const recommendations = await groqSupervisorMatch(project, lecturers);
+    const recommendations = await ollamaSupervisorMatch(project, lecturers);
 
     res.json({
       success: true,
-      source: GROQ_API_KEY ? "groq" : "fallback",
+      source: OLLAMA_API_KEY ? "ollama" : "fallback",
       project,
       recommendations,
     });
