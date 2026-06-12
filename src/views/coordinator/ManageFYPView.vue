@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import AppHeader from '@/components/AppHeader.vue'
 import AppSidebar from '@/components/AppSidebar.vue'
 import AppFooter from '@/components/AppFooter.vue'
@@ -31,6 +31,7 @@ import {
 } from 'lucide-vue-next'
 
 const router = useRouter()
+const route = useRoute()
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
@@ -48,7 +49,7 @@ const assignError = ref('')
 const recordsError = ref('')
 
 const extractionSource = ref('none')
-const matchSource = ref('demo')
+const matchSource = ref('none')
 const selectedFileName = ref('')
 
 const showAssignModal = ref(false)
@@ -66,74 +67,81 @@ const proposalForm = ref({
   keywords: '',
 })
 
-const recommendedSupervisors = ref([
-  {
-    rank: 1,
-    user_id: 4017,
-    name: 'Ts. Dr. Wong Mei Ling',
-    title: 'Senior Lecturer',
-    faculty: 'Faculty of Computing',
-    department: 'Software Engineering',
-    email: 'wong.meiling@utm.my',
-    phone: '+60 13-555 6789',
-    expertise: 'Artificial Intelligence, Machine Learning, Data Analytics',
-    score: 94,
-    workload: 'Available',
-    recentProjects: [
-      'AI-Based Academic Recommendation System',
-      'Student Performance Prediction Dashboard',
-      'Smart Assessment Analytics Platform',
-    ],
-    reason:
-      'Strong match with AI-based analysis, prediction, and intelligent academic workflow automation.',
-    status: 'Best Match',
-  },
-  {
-    rank: 2,
-    user_id: 4019,
-    name: 'Dr. David Kumar',
-    title: 'Senior Lecturer',
-    faculty: 'Faculty of Computing',
-    department: 'Software Engineering',
-    email: 'david.kumar@utm.my',
-    phone: '+60 12-444 8912',
-    expertise: 'Software Engineering, Web Application, System Architecture',
-    score: 87,
-    workload: 'Available',
-    recentProjects: [
-      'Web-Based Academic Management System',
-      'Modular Assessment Workflow Platform',
-      'Software Architecture for Student Portal',
-    ],
-    reason:
-      'Suitable for projects involving web-based platforms, backend workflow, dashboard design, and software architecture.',
-    status: 'Recommended',
-  },
-  {
-    rank: 3,
-    user_id: 4020,
-    name: 'Dr. Lim Wei Jie',
-    title: 'Lecturer',
-    faculty: 'Faculty of Computing',
-    department: 'Information Systems',
-    email: 'lim.weijie@utm.my',
-    phone: '+60 11-222 7634',
-    expertise: 'Database Systems, Academic Information Systems, Automation',
-    score: 81,
-    workload: 'Moderate',
-    recentProjects: [
-      'Database-Driven Academic Record System',
-      'Automated Course Registration Workflow',
-      'Academic Information Management Dashboard',
-    ],
-    reason:
-      'Good match for projects requiring structured data management, automated academic processes, and database-driven system design.',
-    status: 'Alternative',
-  },
-])
+const recommendedSupervisors = ref([])
 
-const selectedSupervisor = ref(recommendedSupervisors.value[0])
+const selectedSupervisor = ref(null)
 const projectRecords = ref([])
+const submittedProposals = ref([])
+const isLoadingQueue = ref(false)
+const queueError = ref('')
+const selectedQueueProjectId = ref(null)
+
+
+const loadSubmittedProposalQueue = async () => {
+  isLoadingQueue.value = true
+  queueError.value = ''
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/coordinator/fyp-queue`)
+    const data = await response.json()
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || 'Failed to load submitted proposal queue.')
+    }
+
+    submittedProposals.value = data.projects || []
+
+    const selectedProjectId = route.query.projectId
+    if (selectedProjectId) {
+      const selected = submittedProposals.value.find(
+        (project) => String(project.project_id) === String(selectedProjectId),
+      )
+
+      if (selected) {
+        openSubmittedProposal(selected)
+      }
+    }
+  } catch (error) {
+    console.error('Load submitted proposal queue error:', error)
+    queueError.value = error.message || 'Failed to load submitted proposal queue.'
+  } finally {
+    isLoadingQueue.value = false
+  }
+}
+
+const openSubmittedProposal = (project) => {
+  selectedQueueProjectId.value = project.project_id
+  recommendedSupervisors.value = []
+  selectedSupervisor.value = null
+  matchSource.value = 'database'
+  lastAssignment.value = null
+
+  proposalForm.value = {
+    members: [
+      {
+        name: project.studentName || 'Student',
+        matricNo: project.matricNo || '',
+      },
+    ],
+    memberText: `${project.studentName || 'Student'} (${project.matricNo || '-'})`,
+    studentName: project.studentName || 'Student',
+    matricNo: project.matricNo || '',
+    projectTitle: project.projectTitle || '',
+    projectType: project.projectType || 'Development',
+    abstract: project.abstract || '',
+    keywords: project.keywords || '',
+  }
+
+  selectedFileName.value = project.fileName || 'Proposal document'
+  extractionSource.value = 'database'
+  extractSuccess.value = `Loaded proposal "${project.projectTitle}" from student submission queue.`
+  extractError.value = ''
+  matchError.value = ''
+
+  activeTab.value = 'matching'
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
 
 const setActiveTab = async (tabName) => {
   activeTab.value = tabName
@@ -245,12 +253,34 @@ const fillSampleProposal = () => {
       'Vue.js, Academic Advisor, Credit Audit Dashboard, Reactive State Management, Pinia, Academic Progression, Graduation Eligibility',
   }
 
-  extractSuccess.value = 'Demo group proposal data filled successfully.'
+  extractSuccess.value = 'Sample proposal data filled.'
   extractError.value = ''
+}
+
+
+const updateProjectStatus = async (status, matchScore = null) => {
+  if (!selectedQueueProjectId.value) return
+
+  try {
+    await fetch(`${API_BASE_URL}/api/coordinator/fyp-status/${selectedQueueProjectId.value}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        status,
+        matchScore,
+      }),
+    })
+  } catch (error) {
+    console.error('Update project status error:', error)
+  }
 }
 
 const runAIMatch = async () => {
   matchError.value = ''
+
+  await updateProjectStatus('Pending AI Matching')
 
   if (
     !proposalForm.value.projectTitle &&
@@ -281,7 +311,12 @@ const runAIMatch = async () => {
     }
 
     recommendedSupervisors.value = data.recommendations || []
-    selectedSupervisor.value = recommendedSupervisors.value[0] || selectedSupervisor.value
+    selectedSupervisor.value = recommendedSupervisors.value[0] || null
+
+    await updateProjectStatus(
+      'Pending Supervisor Assignment',
+      recommendedSupervisors.value[0]?.score || null
+    )
     matchSource.value = data.source || 'unknown'
   } catch (error) {
     console.error('AI supervisor matching error:', error)
@@ -323,6 +358,7 @@ const confirmAssignment = async () => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
+        projectId: selectedQueueProjectId.value,
         project: proposalForm.value,
         supervisor: pendingSupervisor.value,
       }),
@@ -374,7 +410,8 @@ const goToDashboard = () => {
   router.push('/dashboard')
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await loadSubmittedProposalQueue()
   loadProjectRecords()
 })
 </script>
@@ -418,7 +455,7 @@ onMounted(() => {
 
             <div class="flex flex-col sm:flex-row gap-3">
               <button
-                @click="fillSampleProposal"
+                @click="loadSubmittedProposalQueue"
                 class="bg-[#f8be17] text-[#5c001f] px-6 py-3 rounded-full font-bold hover:bg-[#ffd45a] transition-colors shadow-md border-none flex items-center gap-2"
               >
                 <Sparkles class="w-5 h-5" />
@@ -557,11 +594,11 @@ onMounted(() => {
               </div>
 
               <button
-                @click="fillSampleProposal"
+                @click="loadSubmittedProposalQueue"
                 class="bg-[#fff3c4] text-[#5c001f] px-5 py-2.5 rounded-full font-bold hover:bg-[#f8be17] transition-colors border-none flex items-center gap-2"
               >
                 <Sparkles class="w-4 h-4" />
-                Load Demo Proposal
+                Refresh Queue
               </button>
             </div>
 
@@ -596,35 +633,73 @@ onMounted(() => {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr class="border-b border-[#eee3db] hover:bg-[#fffaf0]">
-                    <td class="px-5 py-4 font-bold">Ahmad Daniel<br /><span class="text-xs text-gray-500 font-medium">A24MJ5074</span></td>
-                    <td class="px-5 py-4">Smart Academic Advisor Audit System</td>
-                    <td class="px-5 py-4"><span class="px-3 py-1 rounded-full bg-[#fff3c4] text-[#5c001f] font-bold text-xs">Proposal Submitted</span></td>
-                    <td class="px-5 py-4"><span class="px-3 py-1 rounded-full bg-blue-100 text-blue-700 font-bold text-xs">Pending AI Matching</span></td>
-                    <td class="px-5 py-4">Not Assigned</td>
-                    <td class="px-5 py-4 text-right">
-                      <button @click="fillSampleProposal(); setActiveTab('matching')" class="bg-[#5c001f] text-white px-4 py-2 rounded-full font-bold hover:bg-[#4a0019]">
-                        Review / Run AI
-                      </button>
-                    </td>
-                  </tr>
-                  <tr class="border-b border-[#eee3db] hover:bg-[#fffaf0]">
-                    <td class="px-5 py-4 font-bold">Nur Syafiqah<br /><span class="text-xs text-gray-500 font-medium">A24MJ5081</span></td>
-                    <td class="px-5 py-4">AI-Based Attendance Monitoring System</td>
-                    <td class="px-5 py-4"><span class="px-3 py-1 rounded-full bg-[#fff3c4] text-[#5c001f] font-bold text-xs">Proposal Submitted</span></td>
-                    <td class="px-5 py-4"><span class="px-3 py-1 rounded-full bg-purple-100 text-purple-700 font-bold text-xs">AI Completed</span></td>
-                    <td class="px-5 py-4">Ts. Dr. Wong Mei Ling</td>
-                    <td class="px-5 py-4 text-right"><button @click="setActiveTab('records')" class="bg-[#fff3c4] text-[#5c001f] px-4 py-2 rounded-full font-bold">View Status</button></td>
-                  </tr>
-                  <tr class="hover:bg-[#fffaf0]">
-                    <td class="px-5 py-4 font-bold">Lim Wei Sheng<br /><span class="text-xs text-gray-500 font-medium">A24MJ5092</span></td>
-                    <td class="px-5 py-4">Mobile Learning Platform</td>
-                    <td class="px-5 py-4"><span class="px-3 py-1 rounded-full bg-green-100 text-green-700 font-bold text-xs">Supervisor Approved</span></td>
-                    <td class="px-5 py-4"><span class="px-3 py-1 rounded-full bg-purple-100 text-purple-700 font-bold text-xs">AI Completed</span></td>
-                    <td class="px-5 py-4">Dr. David Kumar</td>
-                    <td class="px-5 py-4 text-right"><button @click="setActiveTab('records')" class="bg-[#fff3c4] text-[#5c001f] px-4 py-2 rounded-full font-bold">View Record</button></td>
-                  </tr>
-                </tbody>
+                <tr v-if="isLoadingQueue">
+                  <td colspan="6" class="px-5 py-8 text-center font-bold text-[#5c001f]">
+                    Loading submitted proposals...
+                  </td>
+                </tr>
+
+                <tr v-else-if="queueError">
+                  <td colspan="6" class="px-5 py-8 text-center font-bold text-red-700">
+                    {{ queueError }}
+                  </td>
+                </tr>
+
+                <tr v-else-if="submittedProposals.length === 0">
+                  <td colspan="6" class="px-5 py-8 text-center text-gray-600">
+                    No student-submitted proposals found.
+                  </td>
+                </tr>
+
+                <tr
+                  v-for="project in submittedProposals"
+                  v-else
+                  :key="project.project_id"
+                  class="border-t border-[#e1d5cc]"
+                  :class="String(selectedQueueProjectId) === String(project.project_id) ? 'bg-[#fff3c4]' : ''"
+                >
+                  <td class="px-5 py-4 font-bold">
+                    {{ project.studentName }}
+                    <br />
+                    <span class="text-xs text-gray-500 font-medium">{{ project.matricNo }}</span>
+                  </td>
+
+                  <td class="px-5 py-4 font-bold max-w-[240px]">
+                    {{ project.projectTitle }}
+                  </td>
+
+                  <td class="px-5 py-4">
+                    <span class="px-3 py-1 rounded-full bg-yellow-100 text-yellow-700 font-bold text-xs">
+                      {{ project.status }}
+                    </span>
+                  </td>
+
+                  <td class="px-5 py-4">
+                    <span
+                      class="px-3 py-1 rounded-full font-bold text-xs"
+                      :class="project.matchScore ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'"
+                    >
+                      {{ project.aiStatus }}
+                    </span>
+                  </td>
+
+                  <td class="px-5 py-4">
+                    {{ project.supervisorName || 'Not Assigned' }}
+                    <div v-if="project.matchScore" class="text-xs text-gray-500">
+                      Score: {{ project.matchScore }}
+                    </div>
+                  </td>
+
+                  <td class="px-5 py-4">
+                    <button
+                      @click="openSubmittedProposal(project)"
+                      class="bg-[#5c001f] text-white px-4 py-2 rounded-full font-bold hover:bg-[#4a0019]"
+                    >
+                      Review / Run AI
+                    </button>
+                  </td>
+                </tr>
+</tbody>
               </table>
             </div>
 
@@ -688,7 +763,18 @@ onMounted(() => {
                     <p class="text-sm font-bold text-[#5c001f] uppercase tracking-[0.18em]">
                       Recommendation
                     </p>
-                    <h2 class="text-[28px] font-bold">Suggested Supervisors</h2>
+                    <div class="flex items-center justify-between gap-4">
+                      <h2 class="text-[28px] font-bold">Suggested Supervisors</h2>
+
+                      <button
+                        v-if="recommendedSupervisors.length > 0"
+                        @click="runAIMatch"
+                        class="bg-[#fff3c4] text-[#5c001f] px-5 py-2.5 rounded-full font-bold hover:bg-[#f8be17] transition-colors inline-flex items-center gap-2"
+                      >
+                        <BrainCircuit class="w-4 h-4" />
+                        Run Again
+                      </button>
+                    </div>
                   </div>
 
                   <button
@@ -718,7 +804,27 @@ onMounted(() => {
                 </div>
 
                 <div v-else class="space-y-5">
+                  
                   <div
+                    v-if="recommendedSupervisors.length === 0"
+                    class="rounded-[24px] border border-[#e1d5cc] bg-[#f7f1ea] p-8 text-center"
+                  >
+                    <BrainCircuit class="w-12 h-12 mx-auto text-[#5c001f]" />
+                    <h3 class="text-xl font-bold mt-4">No AI matching result yet</h3>
+                    <p class="text-gray-600 mt-2">
+                      Open a submitted proposal from the queue, then click Run AI Matching to generate supervisor recommendations.
+                    </p>
+
+                    <button
+                      @click="runAIMatch"
+                      class="mt-6 bg-[#5c001f] text-white px-6 py-3 rounded-full font-bold hover:bg-[#4a0019] transition-colors inline-flex items-center gap-2"
+                    >
+                      <BrainCircuit class="w-5 h-5" />
+                      Run AI Matching
+                    </button>
+                  </div>
+
+<div
                     v-for="supervisor in recommendedSupervisors"
                     :key="supervisor.rank"
                     class="rounded-[24px] border border-[#e1d5cc] p-6 hover:shadow-lg transition-shadow"
@@ -792,7 +898,7 @@ onMounted(() => {
           </div>
 
           <!-- Lecturer Profile Tab -->
-          <div v-if="activeTab === 'profile'" class="p-7">
+          <div v-if="activeTab === 'profile' && selectedSupervisor" class="p-7">
             <div class="grid grid-cols-1 2xl:grid-cols-3 gap-7">
               <div class="2xl:col-span-2 rounded-[26px] border border-[#e1d5cc] p-7 bg-white">
                 <div class="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-6">

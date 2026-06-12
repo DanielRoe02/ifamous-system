@@ -4,12 +4,161 @@ const adminRoutes = require("./routes/admin");
 const mysql = require("mysql2");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
+const nodeFs = require("fs");
+const nodePath = require("path");
+const multer = require("multer");
+const pdfParse = require("pdf-parse");
+const mammoth = require("mammoth");
 
 require("dotenv").config();
 const JWT_SECRET = process.env.JWT_SECRET;
 const bcrypt = require("bcrypt");
 
 const app = express();
+
+const proposalUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 12 * 1024 * 1024,
+  },
+});
+
+function extractJsonFromText(text) {
+  const raw = String(text || "").trim();
+
+  try {
+    return JSON.parse(raw);
+  } catch (_) {}
+
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+
+  try {
+    return JSON.parse(match[0]);
+  } catch (_) {
+    return null;
+  }
+}
+
+async function callGemmaProposalExtractor(proposalText, fileName) {
+  const ollamaBaseUrl = process.env.OLLAMA_API_URL || "https://ollama.com";
+  const model =
+    process.env.OLLAMA_MODEL ||
+    process.env.OLLAMA_CHAT_MODEL ||
+    "gemma4:31b-cloud";
+
+  const prompt = `
+You are an academic Final Year Project proposal extraction assistant for the I-FAMOUS system.
+
+Extract useful FYP information from the proposal text.
+
+Return ONLY valid JSON. Do not use markdown.
+
+Required JSON format:
+{
+  "projectTitle": "clear project title",
+  "projectType": "Development or Research",
+  "abstract": "short but meaningful abstract summary, 80 to 150 words",
+  "keywords": "5 to 8 strong academic keywords separated by commas"
+}
+
+Rules:
+- Do not copy course code as the project title unless no project title exists.
+- Ignore cover page noise such as course code, lecturer name, section, member list, and university name.
+- Prefer the actual system/project title from the proposal content.
+- Keywords must be intelligent academic/technical keywords, not random filename words.
+- If the proposal is about software, system, web app, database, AI, automation, or mobile app, projectType is usually "Development".
+- If information is missing, infer carefully from the proposal text.
+
+File name:
+${fileName}
+
+Proposal text:
+${proposalText.slice(0, 12000)}
+`;
+
+  const response = await fetch(`${ollamaBaseUrl}/api/chat`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: process.env.OLLAMA_API_KEY
+        ? `Bearer ${process.env.OLLAMA_API_KEY}`
+        : undefined,
+    },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    }),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.error || "Gemma proposal extraction failed");
+  }
+
+  const content = data.message?.content || data.response || "";
+  const parsed = extractJsonFromText(content);
+
+  if (!parsed) {
+    throw new Error("AI returned invalid extraction format");
+  }
+
+  return {
+    projectTitle: parsed.projectTitle || "",
+    projectType: parsed.projectType || "Development",
+    abstract: parsed.abstract || "",
+    keywords: parsed.keywords || "",
+  };
+}
+
+async function extractProposalText(file) {
+  const fileName = String(file.originalname || "").toLowerCase();
+  const buffer = file.buffer;
+
+  if (fileName.endsWith(".pdf")) {
+    const result = await pdfParse(buffer);
+    return result.text || "";
+  }
+
+  if (fileName.endsWith(".docx")) {
+    const result = await mammoth.extractRawText({ buffer });
+    return result.value || "";
+  }
+
+  if (fileName.endsWith(".txt")) {
+    return buffer.toString("utf8");
+  }
+
+  throw new Error("Unsupported file type. Please upload PDF, DOCX, or TXT.");
+}
+
+
+const proposalUploadDir = nodePath.join(__dirname, "uploads", "proposals");
+nodeFs.mkdirSync(proposalUploadDir, { recursive: true });
+
+const savedProposalUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      cb(null, proposalUploadDir);
+    },
+    filename: (req, file, cb) => {
+      const safeOriginal = String(file.originalname || "proposal")
+        .replace(/[^a-zA-Z0-9._-]/g, "_");
+      cb(null, `${Date.now()}_${safeOriginal}`);
+    },
+  }),
+  limits: {
+    fileSize: 12 * 1024 * 1024,
+  },
+});
+
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -1305,5 +1454,1158 @@ app.put("/api/admin/users/:id/password", verifyAdmin, async (req, res) => {
 });
 
 app.use("/api/admin", adminRoutes);
+
+
+// ===============================
+// Student My FYP API
+// ===============================
+function getTokenUserId(req) {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ")
+    ? authHeader.slice(7)
+    : authHeader;
+
+  if (!token) return null;
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET || "ifamous-super-secret-key-2026");
+    return decoded.user_id || decoded.userId || decoded.id || decoded.user?.user_id || null;
+  } catch (error) {
+    return null;
+  }
+}
+
+
+app.post("/api/student/extract-proposal", proposalUpload.single("proposal"), async (req, res) => {
+  try {
+    const userId = getTokenUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({ error: "Missing or invalid token" });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: "No proposal file uploaded" });
+    }
+
+    const proposalText = await extractProposalText(req.file);
+
+    if (!proposalText || proposalText.trim().length < 50) {
+      return res.status(400).json({
+        error: "Could not read enough text from the proposal. Try uploading a text-based PDF, DOCX, or TXT file.",
+      });
+    }
+
+    const extracted = await callGemmaProposalExtractor(
+      proposalText,
+      req.file.originalname
+    );
+
+    res.json({
+      success: true,
+      fileName: req.file.originalname,
+      extracted,
+    });
+  } catch (error) {
+    console.error("Proposal extraction error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+
+app.get("/api/student/my-fyp", (req, res) => {
+  const userId = getTokenUserId(req);
+
+  if (!userId) {
+    return res.status(401).json({ error: "Missing or invalid token" });
+  }
+
+  const studentSql = `
+    SELECT 
+      u.user_id,
+      u.full_name,
+      u.email,
+      s.metric_number
+    FROM users u
+    LEFT JOIN students s ON s.student_id = u.user_id
+    WHERE u.user_id = ?
+    LIMIT 1
+  `;
+
+  db.query(studentSql, [userId], (studentErr, studentRows) => {
+    if (studentErr) {
+      return res.status(500).json({ error: studentErr.message });
+    }
+
+    const student = studentRows && studentRows[0];
+
+    if (!student) {
+      return res.status(404).json({ error: "Student user not found" });
+    }
+
+    const projectSql = `
+      SELECT DISTINCT
+        fp.project_id,
+        fp.project_title,
+        fp.project_type,
+        fp.abstract,
+        fp.keywords,
+        fp.supervisor_name,
+        fp.supervisor_email,
+        fp.examiner_name,
+        fp.examiner_email,
+        fp.status,
+        fp.created_at,
+        fp.updated_at
+      FROM fyp_projects fp
+      LEFT JOIN fyp_project_members fpm ON fpm.project_id = fp.project_id
+      WHERE 
+        fp.student_user_id = ?
+        OR LOWER(fpm.matric_no) = LOWER(?)
+        OR LOWER(fpm.student_name) = LOWER(?)
+      ORDER BY fp.updated_at DESC, fp.created_at DESC, fp.project_id DESC
+    `;
+
+    db.query(
+      projectSql,
+      [
+        userId,
+        student.metric_number || "",
+        student.full_name || "",
+      ],
+      (projectErr, projectRows) => {
+        if (projectErr) {
+          return res.status(500).json({ error: projectErr.message });
+        }
+
+        const records = (projectRows || []).map((row) => ({
+          id: row.project_id,
+          project_id: row.project_id,
+          title: row.project_title,
+          type: row.project_type || "Development",
+          abstract: row.abstract || "",
+          keywords: row.keywords || "",
+          status: row.status || "Pending Review",
+          supervisor: row.supervisor_name || "Not Assigned",
+          supervisorEmail: row.supervisor_email || "",
+          examiner: row.examiner_name || "Not Assigned",
+          examinerEmail: row.examiner_email || "",
+          lastUpdated: row.updated_at || row.created_at,
+        }));
+
+        res.json({
+          success: true,
+          student,
+          records,
+        });
+      }
+    );
+  });
+});
+
+
+app.get("/api/student/my-fyp/:projectId", (req, res) => {
+  const userId = getTokenUserId(req);
+  const projectId = req.params.projectId;
+
+  if (!userId) {
+    return res.status(401).json({ error: "Missing or invalid token" });
+  }
+
+  const sql = `
+    SELECT
+      fp.project_id,
+      fp.project_title,
+      fp.project_type,
+      fp.abstract,
+      fp.keywords,
+      fp.student_user_id,
+      fp.student_name,
+      fp.matric_no,
+      fp.supervisor_name,
+      fp.supervisor_email,
+      fp.examiner_name,
+      fp.examiner_email,
+      fp.status,
+      fp.created_at,
+      fp.updated_at,
+      ps.submission_id,
+      ps.submission_title,
+      ps.file_path,
+      ps.original_file_name,
+      ps.submission_type,
+      ps.status AS submission_status,
+      ps.feedback,
+      ps.submitted_at,
+      ps.reviewed_at
+    FROM fyp_projects fp
+    LEFT JOIN projects_submissions ps ON ps.project_id = fp.project_id
+    WHERE fp.project_id = ?
+    AND fp.student_user_id = ?
+  `;
+
+  db.query(sql, [projectId, userId], (err, rows) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: "Project not found for this student" });
+    }
+
+    const first = rows[0];
+
+    const documents = rows
+      .filter((row) => row.submission_id)
+      .map((row) => ({
+        id: row.submission_id,
+        title: row.submission_title || row.original_file_name || row.file_path || "Submitted document",
+        fileName: row.original_file_name || row.file_path || "Document",
+        filePath: row.file_path || "",
+        type: row.submission_type || "proposal",
+        status: row.submission_status || "pending",
+        feedback: row.feedback || "",
+        submittedAt: row.submitted_at,
+        reviewedAt: row.reviewed_at,
+      }));
+
+    res.json({
+      success: true,
+      project: {
+        id: first.project_id,
+        project_id: first.project_id,
+        title: first.project_title,
+        type: first.project_type || "Development",
+        abstract: first.abstract || "",
+        keywords: first.keywords || "",
+        status: first.status || "Pending Review",
+        studentName: first.student_name || "",
+        matricNo: first.matric_no || "",
+        supervisor: first.supervisor_name || "Not Assigned",
+        supervisorEmail: first.supervisor_email || "",
+        examiner: first.examiner_name || "Not Assigned",
+        examinerEmail: first.examiner_email || "",
+        createdAt: first.created_at,
+        updatedAt: first.updated_at,
+        documents,
+      },
+    });
+  });
+});
+
+
+
+app.post("/api/student/my-fyp", (req, res) => {
+  const userId = getTokenUserId(req);
+
+  if (!userId) {
+    return res.status(401).json({ error: "Missing or invalid token" });
+  }
+
+  const {
+    projectTitle,
+    projectType,
+    abstract,
+    keywords,
+    originalFileName
+  } = req.body || {};
+
+  if (!projectTitle || String(projectTitle).trim().length < 3) {
+    return res.status(400).json({ error: "Project title is required" });
+  }
+
+  const studentSql = `
+    SELECT 
+      u.user_id,
+      u.full_name,
+      u.email,
+      s.metric_number
+    FROM users u
+    LEFT JOIN students s ON s.student_id = u.user_id
+    WHERE u.user_id = ?
+    LIMIT 1
+  `;
+
+  db.query(studentSql, [userId], (studentErr, studentRows) => {
+    if (studentErr) {
+      return res.status(500).json({ error: studentErr.message });
+    }
+
+    const student = studentRows && studentRows[0];
+
+    if (!student) {
+      return res.status(404).json({ error: "Student user not found" });
+    }
+
+    const activeSql = `
+      SELECT project_id
+      FROM fyp_projects
+      WHERE student_user_id = ?
+      AND status IN (
+        'Draft',
+        'Pending Review',
+        'Pending Coordinator Review',
+        'Pending AI Matching',
+        'Pending Supervisor Assignment',
+        'Pending Supervisor Approval',
+        'Active',
+        'Assigned'
+      )
+      LIMIT 1
+    `;
+
+    db.query(activeSql, [userId], (activeErr, activeRows) => {
+      if (activeErr) {
+        return res.status(500).json({ error: activeErr.message });
+      }
+
+      if (activeRows && activeRows.length > 0) {
+        return res.status(409).json({
+          error: "You already have a pending or active FYP.",
+        });
+      }
+
+      const insertProjectSql = `
+        INSERT INTO fyp_projects
+          (
+            student_user_id,
+            student_name,
+            matric_no,
+            project_title,
+            project_type,
+            abstract,
+            keywords,
+            supervisor_name,
+            supervisor_email,
+            status,
+            created_at,
+            updated_at
+          )
+        VALUES (?, ?, ?, ?, ?, ?, ?, '', '', 'Pending Coordinator Review', NOW(), NOW())
+      `;
+
+      db.query(
+        insertProjectSql,
+        [
+          userId,
+          student.full_name || "",
+          student.metric_number || "",
+          String(projectTitle).trim(),
+          projectType || "Development",
+          abstract || "",
+          keywords || "",
+        ],
+        (insertErr, result) => {
+          if (insertErr) {
+            return res.status(500).json({ error: insertErr.message });
+          }
+
+          const projectId = result.insertId;
+
+          const memberSql = `
+            INSERT INTO fyp_project_members
+              (project_id, student_name, matric_no)
+            VALUES (?, ?, ?)
+          `;
+
+          db.query(
+            memberSql,
+            [
+              projectId,
+              student.full_name || "Student",
+              student.metric_number || "",
+            ],
+            (memberErr) => {
+              if (memberErr) {
+                console.error("FYP member insert error:", memberErr.message);
+              }
+
+              const submissionSql = `
+                INSERT INTO projects_submissions
+                  (
+                    submission_title,
+                    file_path,
+                    original_file_name,
+                    submitted_at,
+                    submission_type,
+                    status,
+                    project_id
+                  )
+                VALUES (?, ?, ?, NOW(), 'proposal', 'pending', ?)
+              `;
+
+              db.query(
+                submissionSql,
+                [
+                  "Proposal Submission",
+                  originalFileName || "proposal_document",
+                  originalFileName || "proposal_document",
+                  projectId,
+                ],
+                (submissionErr) => {
+                  if (submissionErr) {
+                    console.error("Submission insert error:", submissionErr.message);
+                  }
+
+                  const notificationSql = `
+                    INSERT INTO fyp_notifications
+                      (
+                        project_id,
+                        recipient_type,
+                        recipient_name,
+                        recipient_email,
+                        title,
+                        message,
+                        is_read,
+                        created_at
+                      )
+                    VALUES (?, 'Coordinator', 'Coordinator', '', ?, ?, 0, NOW())
+                  `;
+
+                  db.query(
+                    notificationSql,
+                    [
+                      projectId,
+                      "New FYP Proposal Submitted",
+                      `${student.full_name || "A student"} submitted a new FYP proposal titled "${String(projectTitle).trim()}". Please review and run supervisor matching.`,
+                    ],
+                    (notiErr) => {
+                      if (notiErr) {
+                        console.error("Coordinator notification insert error:", notiErr.message);
+                      }
+
+                      return res.json({
+                        success: true,
+                        message: "FYP proposal submitted successfully and coordinator has been notified.",
+                        projectId,
+                      });
+                    }
+                  );
+                }
+              );
+            }
+          );
+        }
+      );
+    });
+  });
+});
+
+
+
+// ===============================
+// Coordinator FYP Queue API
+// ===============================
+app.get("/api/coordinator/fyp-queue", (req, res) => {
+  const sql = `
+    SELECT
+      fp.project_id,
+      fp.student_user_id,
+      fp.student_name,
+      fp.matric_no,
+      fp.project_title,
+      fp.project_type,
+      fp.abstract,
+      fp.keywords,
+      fp.supervisor_user_id,
+      fp.supervisor_name,
+      fp.supervisor_email,
+      fp.match_score,
+      fp.status,
+      fp.created_at,
+      fp.updated_at,
+      ps.original_file_name,
+      ps.file_path,
+      ps.submission_type,
+      ps.status AS submission_status,
+      ps.submitted_at
+    FROM fyp_projects fp
+    LEFT JOIN projects_submissions ps 
+      ON ps.project_id = fp.project_id
+      AND ps.submission_type = 'proposal'
+    WHERE
+      fp.student_user_id IS NOT NULL
+      OR fp.status IN (
+        'Pending Coordinator Review',
+        'Pending Review',
+        'Pending AI Matching',
+        'Pending Supervisor Assignment',
+        'Pending Supervisor Approval'
+      )
+    ORDER BY fp.created_at DESC, fp.project_id DESC
+  `;
+
+  db.query(sql, (err, rows) => {
+    if (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+
+    const projects = (rows || []).map((row) => ({
+      project_id: row.project_id,
+      student_user_id: row.student_user_id,
+      studentName: row.student_name || "Student",
+      matricNo: row.matric_no || "-",
+      projectTitle: row.project_title || "Untitled FYP",
+      projectType: row.project_type || "Development",
+      abstract: row.abstract || "",
+      keywords: row.keywords || "",
+      supervisor_user_id: row.supervisor_user_id,
+      supervisorName: row.supervisor_name || "Not Assigned",
+      supervisorEmail: row.supervisor_email || "",
+      matchScore: row.match_score || null,
+      status: row.status || "Pending Coordinator Review",
+      proposalStatus: row.submission_status || "pending",
+      aiStatus: row.match_score ? "AI Completed" : "Pending AI Matching",
+      fileName: row.original_file_name || row.file_path || "Proposal document",
+      submittedAt: row.submitted_at || row.created_at,
+      updatedAt: row.updated_at,
+    }));
+
+    res.json({
+      success: true,
+      projects,
+    });
+  });
+});
+
+
+// ===============================
+// Supervisor Dashboard / Projects API
+// ===============================
+app.get("/api/supervisor/dashboard", (req, res) => {
+  const userId = getTokenUserId(req);
+
+  if (!userId) {
+    return res.status(401).json({ error: "Missing or invalid token" });
+  }
+
+  const sql = `
+    SELECT
+      u.user_id,
+      u.full_name,
+      u.email,
+      sv.sv_capacity,
+      sv.current_capacity
+    FROM users u
+    LEFT JOIN supervisor sv ON sv.supervisor_id = u.user_id
+    WHERE u.user_id = ?
+    LIMIT 1
+  `;
+
+  db.query(sql, [userId], (err, supervisorRows) => {
+    if (err) return res.status(500).json({ error: err.message });
+
+    const supervisor = supervisorRows && supervisorRows[0];
+
+    if (!supervisor) {
+      return res.status(404).json({ error: "Supervisor not found" });
+    }
+
+    const projectSql = `
+      SELECT
+        project_id,
+        student_user_id,
+        student_name,
+        matric_no,
+        project_title,
+        project_type,
+        abstract,
+        keywords,
+        status,
+        match_score,
+        created_at,
+        updated_at
+      FROM fyp_projects
+      WHERE supervisor_user_id = ?
+      ORDER BY updated_at DESC, created_at DESC
+    `;
+
+    db.query(projectSql, [userId], (projectErr, projectRows) => {
+      if (projectErr) return res.status(500).json({ error: projectErr.message });
+
+      const projects = projectRows || [];
+
+      const pendingReviews = projects.filter((p) =>
+        ["Assigned", "Pending Supervisor Approval", "Pending Review"].includes(String(p.status || ""))
+      ).length;
+
+      res.json({
+        success: true,
+        supervisor: {
+          user_id: supervisor.user_id,
+          full_name: supervisor.full_name,
+          email: supervisor.email,
+          capacity: supervisor.sv_capacity || 5,
+          current_capacity: projects.length,
+        },
+        stats: {
+          workload: projects.length,
+          capacity: supervisor.sv_capacity || 5,
+          pendingReviews,
+          assignedProjects: projects.length,
+          pendingFeedback: 0,
+          pendingLogbooks: 0,
+        },
+        projects: projects.map((p) => ({
+          project_id: p.project_id,
+          studentName: p.student_name || "Student",
+          matricNo: p.matric_no || "-",
+          projectTitle: p.project_title || "Untitled Project",
+          projectType: p.project_type || "Development",
+          abstract: p.abstract || "",
+          keywords: p.keywords || "",
+          status: p.status || "Assigned",
+          matchScore: p.match_score || null,
+          lastUpdated: p.updated_at || p.created_at,
+        })),
+      });
+    });
+  });
+});
+
+app.get("/api/supervisor/projects", (req, res) => {
+  const userId = getTokenUserId(req);
+
+  if (!userId) {
+    return res.status(401).json({ error: "Missing or invalid token" });
+  }
+
+  const sql = `
+    SELECT
+      project_id,
+      student_user_id,
+      student_name,
+      matric_no,
+      project_title,
+      project_type,
+      abstract,
+      keywords,
+      status,
+      match_score,
+      created_at,
+      updated_at
+    FROM fyp_projects
+    WHERE supervisor_user_id = ?
+    ORDER BY updated_at DESC, created_at DESC
+  `;
+
+  db.query(sql, [userId], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+
+    res.json({
+      success: true,
+      projects: (rows || []).map((p) => ({
+        project_id: p.project_id,
+        studentName: p.student_name || "Student",
+        matricNo: p.matric_no || "-",
+        projectTitle: p.project_title || "Untitled Project",
+        projectType: p.project_type || "Development",
+        abstract: p.abstract || "",
+        keywords: p.keywords || "",
+        status: p.status || "Assigned",
+        matchScore: p.match_score || null,
+        lastUpdated: p.updated_at || p.created_at,
+      })),
+    });
+  });
+});
+
+
+// ===============================
+// Student FYP Submit with File Save
+// ===============================
+app.post("/api/student/my-fyp-submit", savedProposalUpload.single("proposal"), (req, res) => {
+  const userId = getTokenUserId(req);
+
+  if (!userId) {
+    return res.status(401).json({ error: "Missing or invalid token" });
+  }
+
+  const {
+    projectTitle,
+    projectType,
+    abstract,
+    keywords,
+  } = req.body || {};
+
+  if (!projectTitle || String(projectTitle).trim().length < 3) {
+    return res.status(400).json({ error: "Project title is required" });
+  }
+
+  if (!req.file) {
+    return res.status(400).json({ error: "Proposal file is required" });
+  }
+
+  const studentSql = `
+    SELECT 
+      u.user_id,
+      u.full_name,
+      u.email,
+      s.metric_number
+    FROM users u
+    LEFT JOIN students s ON s.student_id = u.user_id
+    WHERE u.user_id = ?
+    LIMIT 1
+  `;
+
+  db.query(studentSql, [userId], (studentErr, studentRows) => {
+    if (studentErr) {
+      return res.status(500).json({ error: studentErr.message });
+    }
+
+    const student = studentRows && studentRows[0];
+
+    if (!student) {
+      return res.status(404).json({ error: "Student user not found" });
+    }
+
+    const activeSql = `
+      SELECT project_id
+      FROM fyp_projects
+      WHERE student_user_id = ?
+      AND status IN (
+        'Draft',
+        'Pending Review',
+        'Pending Coordinator Review',
+        'Pending AI Matching',
+        'Pending Supervisor Assignment',
+        'Pending Supervisor Approval',
+        'Active',
+        'Assigned'
+      )
+      LIMIT 1
+    `;
+
+    db.query(activeSql, [userId], (activeErr, activeRows) => {
+      if (activeErr) {
+        return res.status(500).json({ error: activeErr.message });
+      }
+
+      if (activeRows && activeRows.length > 0) {
+        return res.status(409).json({
+          error: "You already have a pending or active FYP.",
+        });
+      }
+
+      const insertProjectSql = `
+        INSERT INTO fyp_projects
+          (
+            student_user_id,
+            student_name,
+            matric_no,
+            project_title,
+            project_type,
+            abstract,
+            keywords,
+            supervisor_name,
+            supervisor_email,
+            status,
+            created_at,
+            updated_at
+          )
+        VALUES (?, ?, ?, ?, ?, ?, ?, '', '', 'Pending Coordinator Review', NOW(), NOW())
+      `;
+
+      db.query(
+        insertProjectSql,
+        [
+          userId,
+          student.full_name || "",
+          student.metric_number || "",
+          String(projectTitle).trim(),
+          projectType || "Development",
+          abstract || "",
+          keywords || "",
+        ],
+        (insertErr, result) => {
+          if (insertErr) {
+            return res.status(500).json({ error: insertErr.message });
+          }
+
+          const projectId = result.insertId;
+
+          const relativeFilePath = nodePath.join(
+            "uploads",
+            "proposals",
+            req.file.filename
+          );
+
+          const memberSql = `
+            INSERT INTO fyp_project_members
+              (project_id, student_name, matric_no)
+            VALUES (?, ?, ?)
+          `;
+
+          db.query(memberSql, [projectId, student.full_name || "Student", student.metric_number || ""], () => {
+            const submissionSql = `
+              INSERT INTO projects_submissions
+                (
+                  submission_title,
+                  file_path,
+                  original_file_name,
+                  submitted_at,
+                  submission_type,
+                  status,
+                  project_id
+                )
+              VALUES (?, ?, ?, NOW(), 'proposal', 'pending', ?)
+            `;
+
+            db.query(
+              submissionSql,
+              [
+                "Proposal Submission",
+                relativeFilePath,
+                req.file.originalname,
+                projectId,
+              ],
+              (submissionErr) => {
+                if (submissionErr) {
+                  console.error("Submission insert error:", submissionErr.message);
+                }
+
+                const notificationSql = `
+                  INSERT INTO fyp_notifications
+                    (
+                      project_id,
+                      recipient_type,
+                      recipient_name,
+                      recipient_email,
+                      title,
+                      message,
+                      is_read,
+                      created_at
+                    )
+                  VALUES (?, 'Coordinator', 'Coordinator', '', ?, ?, 0, NOW())
+                `;
+
+                db.query(
+                  notificationSql,
+                  [
+                    projectId,
+                    "New FYP Proposal Submitted",
+                    `${student.full_name || "A student"} submitted a new FYP proposal titled "${String(projectTitle).trim()}". Please review and run supervisor matching.`,
+                  ],
+                  () => {
+                    return res.json({
+                      success: true,
+                      message: "FYP proposal submitted successfully and coordinator has been notified.",
+                      projectId,
+                    });
+                  }
+                );
+              }
+            );
+          });
+        }
+      );
+    });
+  });
+});
+
+
+
+// ===============================
+// Supervisor Review API
+// ===============================
+app.get("/api/supervisor/review/:projectId", (req, res) => {
+  const userId = getTokenUserId(req);
+  const projectId = req.params.projectId;
+
+  if (!userId) {
+    return res.status(401).json({ error: "Missing or invalid token" });
+  }
+
+  const sql = `
+    SELECT
+      fp.project_id,
+      fp.project_title,
+      fp.project_type,
+      fp.abstract,
+      fp.keywords,
+      fp.student_user_id,
+      fp.student_name,
+      fp.matric_no,
+      fp.supervisor_user_id,
+      fp.supervisor_name,
+      fp.supervisor_email,
+      fp.status,
+      fp.match_score,
+      fp.created_at,
+      fp.updated_at,
+      ps.submission_id,
+      ps.submission_title,
+      ps.file_path,
+      ps.original_file_name,
+      ps.submission_type,
+      ps.status AS submission_status,
+      ps.feedback,
+      ps.submitted_at
+    FROM fyp_projects fp
+    LEFT JOIN projects_submissions ps 
+      ON ps.project_id = fp.project_id
+      AND ps.submission_type = 'proposal'
+    WHERE fp.project_id = ?
+    AND fp.supervisor_user_id = ?
+  `;
+
+  db.query(sql, [projectId, userId], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: "Project not found for this supervisor" });
+    }
+
+    const first = rows[0];
+
+    const documents = rows
+      .filter((row) => row.submission_id)
+      .map((row) => ({
+        submission_id: row.submission_id,
+        title: row.submission_title || "Proposal Submission",
+        fileName: row.original_file_name || "Proposal document",
+        filePath: row.file_path || "",
+        type: row.submission_type || "proposal",
+        status: row.submission_status || "pending",
+        feedback: row.feedback || "",
+        submittedAt: row.submitted_at,
+      }));
+
+    res.json({
+      success: true,
+      project: {
+        project_id: first.project_id,
+        title: first.project_title,
+        type: first.project_type || "Development",
+        abstract: first.abstract || "",
+        keywords: first.keywords || "",
+        student_user_id: first.student_user_id,
+        studentName: first.student_name || "Student",
+        matricNo: first.matric_no || "-",
+        supervisorName: first.supervisor_name || "Supervisor",
+        status: first.status || "Pending Supervisor Approval",
+        matchScore: first.match_score || null,
+        documents,
+      },
+    });
+  });
+});
+
+app.get("/api/supervisor/review/:projectId/document/:submissionId", (req, res) => {
+  const userId = getTokenUserId(req);
+  const { projectId, submissionId } = req.params;
+
+  if (!userId) {
+    return res.status(401).json({ error: "Missing or invalid token" });
+  }
+
+  const sql = `
+    SELECT ps.file_path, ps.original_file_name
+    FROM projects_submissions ps
+    JOIN fyp_projects fp ON fp.project_id = ps.project_id
+    WHERE ps.submission_id = ?
+    AND ps.project_id = ?
+    AND fp.supervisor_user_id = ?
+    LIMIT 1
+  `;
+
+  db.query(sql, [submissionId, projectId, userId], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: "Document not found" });
+    }
+
+    const doc = rows[0];
+    const absolutePath = nodePath.join(__dirname, doc.file_path || "");
+
+    if (!nodeFs.existsSync(absolutePath)) {
+      return res.status(404).json({ error: "File is missing on server storage" });
+    }
+
+    res.download(absolutePath, doc.original_file_name || "proposal_document");
+  });
+});
+
+app.post("/api/supervisor/review/:projectId/decision", (req, res) => {
+  const userId = getTokenUserId(req);
+  const projectId = req.params.projectId;
+  const { decision, feedback } = req.body || {};
+
+  if (!userId) {
+    return res.status(401).json({ error: "Missing or invalid token" });
+  }
+
+  const decisionValue = String(decision || "").toLowerCase();
+
+  const statusMap = {
+    approve: "Active",
+    revision: "Revision Required",
+    reject: "Rejected",
+  };
+
+  const newStatus = statusMap[decisionValue];
+
+  if (!newStatus) {
+    return res.status(400).json({ error: "Decision must be approve, revision, or reject" });
+  }
+
+  const projectSql = `
+    SELECT 
+      fp.project_id,
+      fp.project_title,
+      fp.student_user_id,
+      fp.student_name,
+      u.email AS student_email
+    FROM fyp_projects fp
+    LEFT JOIN users u ON u.user_id = fp.student_user_id
+    WHERE fp.project_id = ?
+    AND fp.supervisor_user_id = ?
+    LIMIT 1
+  `;
+
+  db.query(projectSql, [projectId, userId], (projectErr, projectRows) => {
+    if (projectErr) return res.status(500).json({ error: projectErr.message });
+
+    if (!projectRows || projectRows.length === 0) {
+      return res.status(404).json({ error: "Project not found for this supervisor" });
+    }
+
+    const project = projectRows[0];
+
+    const updateSql = `
+      UPDATE fyp_projects
+      SET status = ?, updated_at = NOW()
+      WHERE project_id = ?
+      AND supervisor_user_id = ?
+    `;
+
+    db.query(updateSql, [newStatus, projectId, userId], (updateErr) => {
+      if (updateErr) return res.status(500).json({ error: updateErr.message });
+
+      db.query(
+        `
+        UPDATE projects_submissions
+        SET status = ?, feedback = ?, reviewed_by = ?, reviewed_at = NOW()
+        WHERE project_id = ?
+        AND submission_type = 'proposal'
+        `,
+        [
+          decisionValue === "approve" ? "approved" : decisionValue === "revision" ? "pending" : "rejected",
+          feedback || "",
+          userId,
+          projectId,
+        ],
+        () => {}
+      );
+
+      const studentTitle =
+        decisionValue === "approve"
+          ? "FYP Proposal Approved"
+          : decisionValue === "revision"
+            ? "FYP Proposal Requires Revision"
+            : "FYP Proposal Rejected";
+
+      const studentMessage =
+        decisionValue === "approve"
+          ? `Your FYP proposal "${project.project_title}" has been approved by your supervisor.`
+          : decisionValue === "revision"
+            ? `Your FYP proposal "${project.project_title}" requires revision. Supervisor feedback: ${feedback || "Please review your proposal."}`
+            : `Your FYP proposal "${project.project_title}" has been rejected. Supervisor feedback: ${feedback || "No feedback provided."}`;
+
+      db.query(
+        `
+        INSERT INTO fyp_notifications
+          (project_id, recipient_type, recipient_name, recipient_email, title, message, is_read, created_at)
+        VALUES (?, 'Student', ?, ?, ?, ?, 0, NOW())
+        `,
+        [
+          projectId,
+          project.student_name || "Student",
+          project.student_email || "",
+          studentTitle,
+          studentMessage,
+        ],
+        () => {}
+      );
+
+      db.query(
+        `
+        INSERT INTO fyp_notifications
+          (project_id, recipient_type, recipient_name, recipient_email, title, message, is_read, created_at)
+        VALUES (?, 'Coordinator', 'Coordinator', '', ?, ?, 0, NOW())
+        `,
+        [
+          projectId,
+          "Supervisor Decision Submitted",
+          `Supervisor submitted decision "${newStatus}" for project "${project.project_title}".`,
+        ],
+        () => {}
+      );
+
+      res.json({
+        success: true,
+        message: `Decision submitted: ${newStatus}`,
+        status: newStatus,
+      });
+    });
+  });
+});
+
+
+
+// ===============================
+// Coordinator FYP Status Update API
+// ===============================
+app.patch("/api/coordinator/fyp-status/:projectId", (req, res) => {
+  const projectId = req.params.projectId;
+  const { status, matchScore } = req.body || {};
+
+  if (!projectId) {
+    return res.status(400).json({ success: false, error: "Project ID is required" });
+  }
+
+  if (!status) {
+    return res.status(400).json({ success: false, error: "Status is required" });
+  }
+
+  const allowedStatuses = [
+    "Pending Coordinator Review",
+    "Pending AI Matching",
+    "Pending Supervisor Assignment",
+    "Pending Supervisor Approval",
+    "Active",
+    "Revision Required",
+    "Rejected"
+  ];
+
+  if (!allowedStatuses.includes(status)) {
+    return res.status(400).json({ success: false, error: "Invalid project status" });
+  }
+
+  const sql = `
+    UPDATE fyp_projects
+    SET status = ?,
+        match_score = COALESCE(?, match_score),
+        updated_at = NOW()
+    WHERE project_id = ?
+  `;
+
+  db.query(sql, [status, matchScore || null, projectId], (err, result) => {
+    if (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+
+    res.json({
+      success: true,
+      projectId,
+      status,
+      affectedRows: result.affectedRows,
+    });
+  });
+});
 
 app.listen(3000, () => console.log("Backend running on port 3000"));

@@ -802,7 +802,7 @@ router.post("/api/supervisor-matching/assign", async (req, res) => {
   const connection = await db.getConnection();
 
   try {
-    const { project, supervisor, coordinator } = req.body;
+    const { projectId, project, supervisor } = req.body;
 
     if (!project) {
       return res.status(400).json({
@@ -825,59 +825,116 @@ router.post("/api/supervisor-matching/assign", async (req, res) => {
       });
     }
 
-    const members = Array.isArray(project.members) ? project.members : [];
-
     await connection.beginTransaction();
 
-    const [projectResult] = await connection.execute(
-      `
-      INSERT INTO fyp_projects (
-        project_title,
-        project_type,
-        abstract,
-        keywords,
-        supervisor_user_id,
-        supervisor_name,
-        supervisor_email,
-        supervisor_expertise,
-        match_score,
-        status
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      [
-        project.projectTitle,
-        project.projectType || "Development",
-        project.abstract || "",
-        project.keywords || "",
-        supervisor.user_id || null,
-        supervisor.name || "",
-        supervisor.email || "",
-        supervisor.expertise || "",
-        Number(supervisor.score) || 0,
-        "Assigned",
-      ]
-    );
+    let finalProjectId = projectId ? Number(projectId) : null;
 
-    const projectId = projectResult.insertId;
-
-    for (const member of members) {
-      if (!member.name && !member.matricNo) continue;
-
+    if (finalProjectId) {
+      // Update existing student-submitted project
       await connection.execute(
         `
-        INSERT INTO fyp_project_members (
-          project_id,
-          student_name,
-          matric_no
-        )
-        VALUES (?, ?, ?)
+        UPDATE fyp_projects
+        SET
+          project_title = ?,
+          project_type = ?,
+          abstract = ?,
+          keywords = ?,
+          supervisor_user_id = ?,
+          supervisor_name = ?,
+          supervisor_email = ?,
+          supervisor_expertise = ?,
+          match_score = ?,
+          status = 'Pending Supervisor Approval',
+          updated_at = NOW()
+        WHERE project_id = ?
         `,
-        [projectId, member.name || "Unnamed Student", member.matricNo || ""]
+        [
+          project.projectTitle,
+          project.projectType || "Development",
+          project.abstract || "",
+          project.keywords || "",
+          supervisor.user_id || null,
+          supervisor.name || "",
+          supervisor.email || "",
+          supervisor.expertise || "",
+          Number(supervisor.score) || 0,
+          finalProjectId,
+        ]
       );
+    } else {
+      // Fallback for old manual/demo proposal flow
+      const [projectResult] = await connection.execute(
+        `
+        INSERT INTO fyp_projects (
+          project_title,
+          project_type,
+          abstract,
+          keywords,
+          supervisor_user_id,
+          supervisor_name,
+          supervisor_email,
+          supervisor_expertise,
+          match_score,
+          status,
+          created_at,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending Supervisor Approval', NOW(), NOW())
+        `,
+        [
+          project.projectTitle,
+          project.projectType || "Development",
+          project.abstract || "",
+          project.keywords || "",
+          supervisor.user_id || null,
+          supervisor.name || "",
+          supervisor.email || "",
+          supervisor.expertise || "",
+          Number(supervisor.score) || 0,
+        ]
+      );
+
+      finalProjectId = projectResult.insertId;
+
+      const members = Array.isArray(project.members) ? project.members : [];
+      for (const member of members) {
+        if (!member.name && !member.matricNo) continue;
+
+        await connection.execute(
+          `
+          INSERT INTO fyp_project_members (
+            project_id,
+            student_name,
+            matric_no
+          )
+          VALUES (?, ?, ?)
+          `,
+          [finalProjectId, member.name || "Unnamed Student", member.matricNo || ""]
+        );
+      }
     }
 
-    // Notification for selected supervisor
+    // Get project/student info for notifications
+    const [projectRows] = await connection.execute(
+      `
+      SELECT
+        fp.project_id,
+        fp.project_title,
+        fp.student_name,
+        fp.matric_no,
+        fp.student_user_id,
+        u.email AS student_email
+      FROM fyp_projects fp
+      LEFT JOIN users u ON u.user_id = fp.student_user_id
+      WHERE fp.project_id = ?
+      LIMIT 1
+      `,
+      [finalProjectId]
+    );
+
+    const savedProject = projectRows[0] || {};
+
+    // Supervisor notification
     await connection.execute(
       `
       INSERT INTO fyp_notifications (
@@ -886,21 +943,22 @@ router.post("/api/supervisor-matching/assign", async (req, res) => {
         recipient_name,
         recipient_email,
         title,
-        message
+        message,
+        is_read,
+        created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?)
+      VALUES (?, 'Supervisor', ?, ?, ?, ?, 0, NOW())
       `,
       [
-        projectId,
-        "Supervisor",
+        finalProjectId,
         supervisor.name || "Supervisor",
         supervisor.email || "",
         "New FYP Supervision Assignment",
-        `You have been assigned to supervise the project "${project.projectTitle}".`,
+        `You have been assigned to supervise the project "${savedProject.project_title || project.projectTitle}".`,
       ]
     );
 
-    // Notification for coordinator
+    // Coordinator notification
     await connection.execute(
       `
       INSERT INTO fyp_notifications (
@@ -909,22 +967,21 @@ router.post("/api/supervisor-matching/assign", async (req, res) => {
         recipient_name,
         recipient_email,
         title,
-        message
+        message,
+        is_read,
+        created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?)
+      VALUES (?, 'Coordinator', 'Coordinator', '', ?, ?, 0, NOW())
       `,
       [
-        projectId,
-        "Coordinator",
-        coordinator?.name || "Coordinator",
-        coordinator?.email || "",
+        finalProjectId,
         "Supervisor Assignment Completed",
-        `You assigned ${supervisor.name} as supervisor for the project "${project.projectTitle}".`,
+        `You assigned ${supervisor.name} as supervisor for the project "${savedProject.project_title || project.projectTitle}".`,
       ]
     );
 
-    // Notifications for students
-    for (const member of members) {
+    // Student notification
+    if (savedProject.student_user_id || savedProject.student_email) {
       await connection.execute(
         `
         INSERT INTO fyp_notifications (
@@ -933,17 +990,18 @@ router.post("/api/supervisor-matching/assign", async (req, res) => {
           recipient_name,
           recipient_email,
           title,
-          message
+          message,
+          is_read,
+          created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?, 'Student', ?, ?, ?, ?, 0, NOW())
         `,
         [
-          projectId,
-          "Student",
-          member.name || "Student",
-          member.email || "",
+          finalProjectId,
+          savedProject.student_name || "Student",
+          savedProject.student_email || "",
           "FYP Supervisor Assigned",
-          `Your project "${project.projectTitle}" has been assigned to ${supervisor.name}.`,
+          `Your project "${savedProject.project_title || project.projectTitle}" has been assigned to ${supervisor.name}.`,
         ]
       );
     }
@@ -954,13 +1012,12 @@ router.post("/api/supervisor-matching/assign", async (req, res) => {
       success: true,
       message: "Supervisor assigned successfully.",
       assignment: {
-        project_id: projectId,
-        projectTitle: project.projectTitle,
-        supervisorName: supervisor.name,
-        supervisorEmail: supervisor.email,
+        projectId: finalProjectId,
+        supervisorId: supervisor.user_id || null,
+        supervisorName: supervisor.name || "",
+        supervisorEmail: supervisor.email || "",
         matchScore: Number(supervisor.score) || 0,
-        status: "Assigned",
-        members,
+        status: "Pending Supervisor Approval",
       },
     });
   } catch (error) {
@@ -978,7 +1035,7 @@ router.post("/api/supervisor-matching/assign", async (req, res) => {
   }
 });
 
-// ------------------------------------------------------------
+
 // GET: Project records
 // ------------------------------------------------------------
 router.get("/api/supervisor-matching/projects", async (req, res) => {

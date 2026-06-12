@@ -1,4 +1,26 @@
 <script setup>
+function getDisplayName() {
+  try {
+    const raw =
+      localStorage.getItem("user") ||
+      localStorage.getItem("ifamous_user") ||
+      localStorage.getItem("currentUser");
+
+    const user = raw ? JSON.parse(raw) : {};
+
+    return (
+      user.full_name ||
+      user.fullName ||
+      user.name ||
+      localStorage.getItem("full_name") ||
+      localStorage.getItem("userName") ||
+      "Supervisor"
+    );
+  } catch (error) {
+    return "Supervisor";
+  }
+}
+
 import { useRouter } from 'vue-router'
 import AppHeader from '@/components/AppHeader.vue'
 import {
@@ -53,7 +75,7 @@ const tasks = [
         <section class="rounded-[32px] bg-[#5c001f] text-white p-8 shadow-xl relative overflow-hidden">
           <div class="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-[#f8be17]/20"></div>
           <p class="text-[#f8be17] font-bold uppercase tracking-[0.2em]">I-FAMOUS Supervisor</p>
-          <h1 class="text-[36px] font-bold mt-2">Welcome, Ts. Dr. Wong Mei Ling</h1>
+          <h1 class="text-[36px] font-bold mt-2">Welcome, {{ getDisplayName() }}</h1>
           <p class="text-white/80 mt-2">Review assigned projects, approve/reject submissions, give feedback and check logbooks.</p>
         </section>
 

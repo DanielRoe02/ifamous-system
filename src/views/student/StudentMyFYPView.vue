@@ -1,119 +1,331 @@
 <script setup>
-import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import AppHeader from '@/components/AppHeader.vue'
+import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import {
   AlertTriangle,
   BookOpenCheck,
-  CheckCircle2,
   ChevronRight,
-  ClipboardList,
   CloudUpload,
   Eye,
   FileText,
   FolderKanban,
   LayoutDashboard,
   Loader2,
-  Pencil,
   Plus,
+  RefreshCw,
   Send,
-  XCircle,
-} from 'lucide-vue-next'
+  X,
+} from "lucide-vue-next";
+import AppHeader from "@/components/AppHeader.vue";
 
-const router = useRouter()
-const mode = ref('records')
-const isExtracting = ref(false)
-const isSubmitted = ref(false)
-const selectedFileName = ref('')
-const isDragging = ref(false)
-const fileInput = ref(null)
+const router = useRouter();
 
-const fypRecords = ref([
-  {
-    id: 1,
-    title: 'Old Smart Attendance System',
-    type: 'Development',
-    status: 'Rejected',
-    supervisor: '-',
-    lastUpdated: '2 Apr 2026',
-  },
-  {
-    id: 2,
-    title: 'Smart Academic Advisor Audit System',
-    type: 'Development',
-    status: 'Pending Review',
-    supervisor: 'Not Assigned',
-    lastUpdated: '20 May 2026',
-  },
-])
+const API_BASE =
+  import.meta.env.VITE_API_URL ||
+  import.meta.env.VITE_API_BASE_URL ||
+  "http://localhost:3000";
 
-const hasBlockedFyp = computed(() => {
-  return fypRecords.value.some((item) =>
-    ['Pending Review', 'Pending AI Matching', 'Pending Supervisor Assignment', 'Pending Supervisor Approval', 'Active', 'Revision Required'].includes(item.status)
-  )
-})
+const mode = ref("records");
+const loading = ref(false);
+const submitting = ref(false);
+const extracting = ref(false);
+const errorMessage = ref("");
+const successMessage = ref("");
+const isDragging = ref(false);
+const fileInput = ref(null);
+const selectedFile = ref(null);
 
-const canCreateFyp = computed(() => !hasBlockedFyp.value)
+const fypRecords = ref([]);
 
 const form = ref({
-  projectTitle: 'Software Engineering Smart Academic Advisor (AA) Audit System',
-  projectType: 'Development',
-  abstract: 'This system aims to develop a smart academic advisor audit system to monitor and analyze academic advising activities, academic progress, missing subjects, failed subjects and graduation readiness.',
-  keywords: 'AI, Academic Advisor, Audit System, Software Engineering, Vue.js',
-  members: '1. Ahmad Daniel Tamingsari Bin Ramlan (A24MJ5074)',
-})
+  projectType: "Development",
+  projectTitle: "",
+  abstract: "",
+  keywords: "",
+});
 
-const statusClass = (status) => {
-  if (status === 'Active') return 'bg-green-100 text-green-800'
-  if (status === 'Rejected') return 'bg-red-100 text-red-800'
-  if (status === 'Revision Required') return 'bg-orange-100 text-orange-800'
-  if (status.includes('Pending')) return 'bg-[#fff3c4] text-[#5c001f]'
-  return 'bg-gray-100 text-gray-700'
+const activeStatuses = [
+  "Draft",
+  "Pending Review",
+  "Pending AI Matching",
+  "Pending Supervisor Assignment",
+  "Pending Supervisor Approval",
+  "Active",
+];
+
+const canCreateFyp = computed(() => {
+  return !fypRecords.value.some((record) =>
+    activeStatuses.includes(String(record.status || "").trim())
+  );
+});
+
+function getAuthToken() {
+  return (
+    localStorage.getItem("token") ||
+    localStorage.getItem("authToken") ||
+    localStorage.getItem("ifamous_token") ||
+    localStorage.getItem("ifamousToken") ||
+    sessionStorage.getItem("token") ||
+    ""
+  );
 }
 
-const startCreateFlow = () => {
-  if (!canCreateFyp.value) return
-  mode.value = 'create'
-  isSubmitted.value = false
-}
+function formatDate(value) {
+  if (!value) return "-";
 
-const allowedExtensions = ['.pdf', '.doc', '.docx', '.txt']
+  const date = new Date(value);
 
-const processProposalFile = (file) => {
-  if (!file) return
-
-  const fileName = file.name.toLowerCase()
-  const validExtension = allowedExtensions.some((extension) => fileName.endsWith(extension))
-
-  if (!validExtension) {
-    alert('Only PDF, DOC, DOCX, or TXT proposal files are allowed.')
-    return
+  if (Number.isNaN(date.getTime())) {
+    return "-";
   }
 
-  selectedFileName.value = file.name
-  isExtracting.value = true
-
-  setTimeout(() => {
-    isExtracting.value = false
-    mode.value = 'review'
-  }, 700)
+  return date.toLocaleDateString("en-MY", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
 }
 
-const handleUpload = async (event) => {
-  const file = event.target.files?.[0]
-  processProposalFile(file)
+function normalizeRecord(record) {
+  return {
+    id: record.id || record.project_id,
+    project_id: record.project_id || record.id,
+    title: record.title || record.project_title || "Untitled FYP",
+    type: record.type || record.project_type || "Development",
+    abstract: record.abstract || "",
+    keywords: record.keywords || "",
+    status: record.status || "Pending Review",
+    supervisor: record.supervisor || record.supervisor_name || "Not Assigned",
+    supervisorEmail: record.supervisorEmail || record.supervisor_email || "",
+    examiner: record.examiner || record.examiner_name || "Not Assigned",
+    examinerEmail: record.examinerEmail || record.examiner_email || "",
+    lastUpdated: formatDate(record.lastUpdated || record.updated_at || record.created_at),
+  };
 }
 
-const handleDrop = (event) => {
-  isDragging.value = false
-  const file = event.dataTransfer.files?.[0]
-  processProposalFile(file)
+async function loadMyFyp() {
+  loading.value = true;
+  errorMessage.value = "";
+  successMessage.value = "";
+
+  try {
+    const token = getAuthToken();
+
+    const response = await fetch(`${API_BASE}/api/student/my-fyp`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "Failed to load My FYP records");
+    }
+
+    fypRecords.value = (data.records || []).map(normalizeRecord);
+  } catch (error) {
+    errorMessage.value = error.message;
+    fypRecords.value = [];
+  } finally {
+    loading.value = false;
+  }
 }
 
-const submitProposal = () => {
-  isSubmitted.value = true
-  mode.value = 'submitted'
+function startCreateFlow() {
+  if (!canCreateFyp.value) return;
+
+  form.value = {
+    projectType: "Development",
+    projectTitle: "",
+    abstract: "",
+    keywords: "",
+  };
+
+  selectedFile.value = null;
+  errorMessage.value = "";
+  successMessage.value = "";
+  mode.value = "upload";
 }
+
+function validateBasicInfo() {
+  if (!form.value.projectTitle || form.value.projectTitle.trim().length < 3) {
+    errorMessage.value = "Please enter a valid project title.";
+    return false;
+  }
+
+  if (!form.value.abstract || form.value.abstract.trim().length < 10) {
+    errorMessage.value = "Please enter a short description or abstract.";
+    return false;
+  }
+
+  errorMessage.value = "";
+  return true;
+}
+
+function goToUpload() {
+  if (!validateBasicInfo()) return;
+  mode.value = "upload";
+}
+
+function openFilePicker() {
+  fileInput.value?.click();
+}
+
+function setSelectedFile(file) {
+  if (!file) return;
+
+  const allowedExtensions = [".pdf", ".doc", ".docx", ".txt"];
+  const fileName = String(file.name || "").toLowerCase();
+  const isAllowed = allowedExtensions.some((extension) =>
+    fileName.endsWith(extension)
+  );
+
+  if (!isAllowed) {
+    errorMessage.value = "Only .pdf, .doc, .docx, or .txt files are supported.";
+    return;
+  }
+
+  selectedFile.value = file;
+  errorMessage.value = "";
+}
+
+function handleUpload(event) {
+  const file = event.target.files?.[0];
+  setSelectedFile(file);
+}
+
+function handleDrop(event) {
+  isDragging.value = false;
+  const file = event.dataTransfer.files?.[0];
+  setSelectedFile(file);
+}
+
+function removeFile() {
+  selectedFile.value = null;
+
+  if (fileInput.value) {
+    fileInput.value.value = "";
+  }
+}
+
+async function goToReview() {
+  if (!selectedFile.value) {
+    errorMessage.value = "Please upload your proposal document first.";
+    return;
+  }
+
+  extracting.value = true;
+  errorMessage.value = "";
+
+  try {
+    const uploadData = new FormData();
+    uploadData.append("proposal", selectedFile.value);
+
+    const response = await fetch(`${API_BASE}/api/student/extract-proposal`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${getAuthToken()}`,
+      },
+      body: uploadData,
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "AI extraction failed.");
+    }
+
+    const extracted = data.extracted || {};
+
+    form.value.projectTitle = extracted.projectTitle || "FYP Proposal";
+    form.value.projectType = extracted.projectType || "Development";
+    form.value.abstract = extracted.abstract || "";
+    form.value.keywords = extracted.keywords || "";
+
+    mode.value = "review";
+  } catch (error) {
+    errorMessage.value = error.message;
+  } finally {
+    extracting.value = false;
+  }
+}
+
+async function submitFypToDatabase() {
+  submitting.value = true;
+  errorMessage.value = "";
+  successMessage.value = "";
+
+  try {
+    const token = getAuthToken();
+
+    const submitData = new FormData();
+    submitData.append("projectTitle", form.value.projectTitle);
+    submitData.append("projectType", form.value.projectType);
+    submitData.append("abstract", form.value.abstract);
+    submitData.append("keywords", form.value.keywords || "");
+
+    if (selectedFile.value) {
+      submitData.append("proposal", selectedFile.value);
+    }
+
+    const response = await fetch(`${API_BASE}/api/student/my-fyp-submit`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: submitData,
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "Failed to submit FYP proposal.");
+    }
+
+    successMessage.value = data.message || "FYP proposal submitted successfully.";
+    await loadMyFyp();
+    selectedFile.value = null;
+    mode.value = "records";
+  } catch (error) {
+    errorMessage.value = error.message;
+  } finally {
+    submitting.value = false;
+  }
+}
+
+function viewRecord(record) {
+  router.push({
+    path: "/student-project-details",
+    query: {
+      projectId: record.project_id || record.id,
+    },
+  });
+}
+
+function statusClass(status) {
+  const value = String(status || "").toLowerCase();
+
+  if (value.includes("rejected")) {
+    return "bg-red-100 text-red-700";
+  }
+
+  if (value.includes("active") || value.includes("approved")) {
+    return "bg-green-100 text-green-700";
+  }
+
+  if (value.includes("revision")) {
+    return "bg-orange-100 text-orange-700";
+  }
+
+  if (value.includes("pending") || value.includes("draft")) {
+    return "bg-yellow-100 text-yellow-700";
+  }
+
+  return "bg-gray-100 text-gray-700";
+}
+
+onMounted(loadMyFyp);
 </script>
 
 <template>
@@ -123,19 +335,34 @@ const submitProposal = () => {
     <div class="flex">
       <aside class="w-[240px] bg-[#f7f1ea] border-r border-[#d8c9bd] min-h-[calc(100vh-70px)] p-4">
         <div class="bg-white/80 border border-[#e1d5cc] rounded-[18px] p-4 mb-4">
-          <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#5c001f]">Student</p>
+          <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#5c001f]">
+            Student
+          </p>
           <p class="text-sm text-gray-600 mt-1">FYP Workspace</p>
         </div>
 
         <nav class="space-y-2">
-          <button @click="router.push('/student-dashboard')" class="w-full hover:bg-white text-[#2b1b1b] rounded-[14px] px-4 py-3 flex items-center gap-3 font-bold">
-            <LayoutDashboard class="w-5 h-5 text-[#5c001f]" /> Dashboard
+          <button
+            @click="router.push('/student-dashboard')"
+            class="w-full hover:bg-white text-[#2b1b1b] rounded-[14px] px-4 py-3 flex items-center gap-3 font-bold"
+          >
+            <LayoutDashboard class="w-5 h-5 text-[#5c001f]" />
+            Dashboard
           </button>
-          <button class="w-full bg-[#5c001f] text-white rounded-[14px] px-4 py-3 flex items-center gap-3 font-bold">
-            <FolderKanban class="w-5 h-5 text-[#f8be17]" /> My FYP
+
+          <button
+            class="w-full bg-[#5c001f] text-white rounded-[14px] px-4 py-3 flex items-center gap-3 font-bold"
+          >
+            <FolderKanban class="w-5 h-5 text-[#f8be17]" />
+            My FYP
           </button>
-          <button @click="router.push('/student-logbook')" class="w-full hover:bg-white text-[#2b1b1b] rounded-[14px] px-4 py-3 flex items-center gap-3 font-bold">
-            <BookOpenCheck class="w-5 h-5 text-[#5c001f]" /> Logbook
+
+          <button
+            @click="router.push('/student-logbook')"
+            class="w-full hover:bg-white text-[#2b1b1b] rounded-[14px] px-4 py-3 flex items-center gap-3 font-bold"
+          >
+            <BookOpenCheck class="w-5 h-5 text-[#5c001f]" />
+            Logbook
           </button>
         </nav>
       </aside>
@@ -143,37 +370,106 @@ const submitProposal = () => {
       <main class="flex-1 p-8 space-y-7">
         <section class="rounded-[32px] bg-[#5c001f] text-white p-8 shadow-xl relative overflow-hidden">
           <div class="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-[#f8be17]/20"></div>
-          <p class="text-[#f8be17] font-bold uppercase tracking-[0.2em]">Student Module</p>
+          <p class="text-[#f8be17] font-bold uppercase tracking-[0.2em]">
+            Student Module
+          </p>
           <h1 class="text-[36px] font-bold mt-2">My FYP</h1>
-          <p class="text-white/80 mt-2">Create FYP only when you have no active or pending FYP. Rejected projects remain as history.</p>
+          <p class="text-white/80 mt-2">
+            Create FYP only when you have no active or pending FYP. Rejected projects remain as history.
+          </p>
         </section>
 
-        <section v-if="mode === 'records'" class="bg-white rounded-[28px] p-7 shadow-lg border border-black/10">
+        <div
+          v-if="errorMessage"
+          class="rounded-[18px] border border-red-200 bg-red-50 text-red-700 px-5 py-4 font-semibold flex items-start gap-3"
+        >
+          <AlertTriangle class="w-5 h-5 shrink-0 mt-0.5" />
+          <span>{{ errorMessage }}</span>
+        </div>
+
+        <div
+          v-if="successMessage"
+          class="rounded-[18px] border border-green-200 bg-green-50 text-green-700 px-5 py-4 font-semibold"
+        >
+          {{ successMessage }}
+        </div>
+
+        <section
+          v-if="mode === 'records'"
+          class="bg-white rounded-[28px] p-7 shadow-lg border border-black/10"
+        >
           <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
             <div>
-              <p class="text-sm font-bold text-[#5c001f] uppercase tracking-[0.18em]">FYP Records</p>
+              <p class="text-sm font-bold text-[#5c001f] uppercase tracking-[0.18em]">
+                FYP Records
+              </p>
               <h2 class="text-[28px] font-bold mt-1">My FYP Attempts</h2>
-              <p class="text-gray-600 mt-1">A student can only have one pending or active FYP at a time.</p>
+              <p class="text-gray-600 mt-1">
+                A student can only have one pending or active FYP at a time.
+              </p>
             </div>
-            <button
-              @click="startCreateFlow"
-              :disabled="!canCreateFyp"
-              :class="canCreateFyp ? 'bg-[#5c001f] text-white hover:bg-[#4a0019]' : 'bg-gray-200 text-gray-500 cursor-not-allowed'"
-              class="px-6 py-3 rounded-full font-bold flex items-center gap-2 transition-colors"
-            >
-              <Plus class="w-5 h-5" /> Create FYP
-            </button>
+
+            <div class="flex gap-3">
+              <button
+                @click="loadMyFyp"
+                class="px-4 py-3 rounded-full font-bold flex items-center gap-2 bg-[#f7f1ea] text-[#5c001f] hover:bg-[#efe4d9]"
+              >
+                <RefreshCw class="w-5 h-5" />
+                Refresh
+              </button>
+
+              <button
+                @click="startCreateFlow"
+                :disabled="!canCreateFyp"
+                :class="
+                  canCreateFyp
+                    ? 'bg-[#5c001f] text-white hover:bg-[#4a0019]'
+                    : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                "
+                class="px-6 py-3 rounded-full font-bold flex items-center gap-2 transition-colors"
+              >
+                <Plus class="w-5 h-5" />
+                Create FYP
+              </button>
+            </div>
           </div>
 
-          <div v-if="!canCreateFyp" class="mb-6 rounded-[20px] bg-[#fff3c4] border border-[#f8be17] p-5 text-[#5c001f] flex gap-3">
+          <div
+            v-if="!canCreateFyp"
+            class="mb-6 rounded-[20px] bg-[#fff3c4] border border-[#f8be17] p-5 text-[#5c001f] flex gap-3"
+          >
             <AlertTriangle class="w-6 h-6 shrink-0" />
             <div>
               <p class="font-bold">Create FYP is locked.</p>
-              <p class="text-sm mt-1">You already have a pending or active FYP. Wait for review, approval, or final rejection before creating a new FYP proposal.</p>
+              <p class="text-sm mt-1">
+                You already have a pending or active FYP. Wait for review, approval, or final rejection before creating a new FYP proposal.
+              </p>
             </div>
           </div>
 
-          <div class="overflow-x-auto rounded-[22px] border border-[#e1d5cc]">
+          <div
+            v-if="loading"
+            class="rounded-[22px] border border-[#e1d5cc] p-8 text-center text-[#5c001f] font-bold flex items-center justify-center gap-3"
+          >
+            <Loader2 class="w-5 h-5 animate-spin" />
+            Loading My FYP records...
+          </div>
+
+          <div
+            v-else-if="fypRecords.length === 0"
+            class="rounded-[22px] border border-[#e1d5cc] p-8 text-center"
+          >
+            <FolderKanban class="w-14 h-14 mx-auto text-[#5c001f]" />
+            <h3 class="text-xl font-bold mt-4">No FYP record found</h3>
+            <p class="text-gray-600 mt-2">
+              You can create your first FYP proposal using the Create FYP button.
+            </p>
+          </div>
+
+          <div
+            v-else
+            class="overflow-x-auto rounded-[22px] border border-[#e1d5cc]"
+          >
             <table class="w-full text-sm">
               <thead class="bg-[#f7f1ea] text-left">
                 <tr>
@@ -186,99 +482,201 @@ const submitProposal = () => {
                   <th class="text-right pr-5">Action</th>
                 </tr>
               </thead>
+
               <tbody>
-                <tr v-for="(record, index) in fypRecords" :key="record.id" class="border-t border-[#e1d5cc]">
+                <tr
+                  v-for="(record, index) in fypRecords"
+                  :key="record.id"
+                  class="border-t border-[#e1d5cc]"
+                >
                   <td class="px-5 py-4 font-bold">{{ index + 1 }}</td>
                   <td class="font-bold max-w-[260px]">{{ record.title }}</td>
                   <td>{{ record.type }}</td>
-                  <td><span :class="statusClass(record.status)" class="px-3 py-1 rounded-full font-bold text-xs">{{ record.status }}</span></td>
+                  <td>
+                    <span
+                      :class="statusClass(record.status)"
+                      class="px-3 py-1 rounded-full font-bold text-xs"
+                    >
+                      {{ record.status }}
+                    </span>
+                  </td>
                   <td>{{ record.supervisor }}</td>
                   <td>{{ record.lastUpdated }}</td>
-                  <td class="text-right pr-5"><button class="inline-flex items-center gap-2 text-[#5c001f] font-bold"><Eye class="w-4 h-4" /> View</button></td>
+                  <td class="text-right pr-5">
+                    <button
+                      @click="viewRecord(record)"
+                      class="inline-flex items-center gap-2 text-[#5c001f] font-bold"
+                    >
+                      <Eye class="w-4 h-4" />
+                      View
+                    </button>
+                  </td>
                 </tr>
               </tbody>
             </table>
           </div>
         </section>
-
-        <section v-if="mode === 'create'" class="bg-white rounded-[28px] p-7 shadow-lg border border-black/10">
+        <section v-if="mode === 'upload'"
+          class="bg-white rounded-[28px] p-7 shadow-lg border border-black/10"
+        >
           <div class="flex items-center justify-between mb-6">
             <div>
-              <p class="text-sm font-bold text-[#5c001f] uppercase tracking-[0.18em]">Create FYP</p>
-              <h2 class="text-[28px] font-bold">Step 1: Enter Basic FYP Information</h2>
+              <p class="text-sm font-bold text-[#5c001f] uppercase tracking-[0.18em]">
+                Upload Proposal
+              </p>
+              <h2 class="text-[28px] font-bold">
+                Upload Proposal Document
+              </h2>
             </div>
-            <button @click="mode = 'records'" class="text-[#5c001f] font-bold">Back to records</button>
-          </div>
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <div>
-              <label class="block text-sm font-bold mb-2">Project Type</label>
-              <select v-model="form.projectType" class="w-full rounded-[16px] border border-[#d8c9bd] px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#f8be17]"><option>Development</option><option>Research</option></select>
-            </div>
-            <div>
-              <label class="block text-sm font-bold mb-2">Project Title / Working Title</label>
-              <input v-model="form.projectTitle" class="w-full rounded-[16px] border border-[#d8c9bd] px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#f8be17]" />
-            </div>
-          </div>
-          <div class="mt-5">
-            <label class="block text-sm font-bold mb-2">Short Description</label>
-            <textarea v-model="form.abstract" rows="4" class="w-full rounded-[16px] border border-[#d8c9bd] px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#f8be17]"></textarea>
-          </div>
-          <div class="mt-7 flex justify-end"><button @click="mode = 'upload'" class="bg-[#5c001f] text-white px-6 py-3 rounded-full font-bold flex items-center gap-2">Next <ChevronRight class="w-5 h-5" /></button></div>
-        </section>
 
-        <section v-if="mode === 'upload'" class="bg-white rounded-[28px] p-7 shadow-lg border border-black/10">
+            <button
+              @click="mode = 'records'"
+              class="text-[#5c001f] font-bold"
+            >
+              Back
+            </button>
+          </div>
+
           <div
             class="rounded-[26px] border-2 border-dashed p-10 text-center transition-all duration-200"
-            :class="isDragging ? 'border-[#5c001f] bg-[#fff3c4] scale-[1.01]' : 'border-[#d4bfae] bg-[#f7f1ea]'"
+            :class="
+              isDragging
+                ? 'border-[#5c001f] bg-[#fff3c4] scale-[1.01]'
+                : 'border-[#d4bfae] bg-[#f7f1ea]'
+            "
             @dragover.prevent="isDragging = true"
             @dragleave.prevent="isDragging = false"
             @drop.prevent="handleDrop"
           >
             <CloudUpload class="w-16 h-16 mx-auto text-[#5c001f]" />
-            <h2 class="text-2xl font-bold mt-4">Step 2: Upload Proposal Document</h2>
-            <p class="text-sm text-gray-600 mt-2">Supported: .pdf, .doc, .docx, .txt. Drag and drop your file here or choose manually.</p>
-            <input ref="fileInput" class="hidden" type="file" accept=".pdf,.doc,.docx,.txt" @change="handleUpload" />
+            <h2 class="text-2xl font-bold mt-4">Upload Proposal Document</h2>
+            <p class="text-sm text-gray-600 mt-2">
+              Supported: .pdf, .doc, .docx, .txt. Drag and drop your file here or choose manually.
+            </p>
+
+            <input
+              ref="fileInput"
+              class="hidden"
+              type="file"
+              accept=".pdf,.doc,.docx,.txt"
+              @change="handleUpload"
+            />
+
             <button
-              type="button"
-              @click="fileInput?.click()"
-              class="mt-6 inline-flex items-center gap-2 bg-[#5c001f] text-white px-6 py-3 rounded-full font-bold cursor-pointer"
+              @click="openFilePicker"
+              class="mt-6 bg-[#5c001f] text-white px-6 py-3 rounded-full font-bold"
             >
-              <Loader2 v-if="isExtracting" class="w-5 h-5 animate-spin text-[#f8be17]" />
-              <FileText v-else class="w-5 h-5" />
-              {{ isExtracting ? 'Extracting...' : 'Choose File' }}
+              Choose File
             </button>
-            <p class="mt-4 text-sm text-gray-600">Drop proposal file anywhere inside this box.</p>
-            <p v-if="selectedFileName" class="mt-4 text-sm font-bold text-[#5c001f]">Selected: {{ selectedFileName }}</p>
           </div>
-          <div class="mt-7 flex justify-between"><button @click="mode = 'create'" class="bg-[#e7ded3] text-[#5c001f] px-6 py-3 rounded-full font-bold">Back</button></div>
+
+          <div
+            v-if="selectedFile"
+            class="mt-5 rounded-[20px] border border-[#e1d5cc] bg-[#f7f1ea] p-5 flex items-center justify-between"
+          >
+            <div class="flex items-center gap-3">
+              <FileText class="w-8 h-8 text-[#5c001f]" />
+              <div>
+                <p class="font-bold">{{ selectedFile.name }}</p>
+                <p class="text-sm text-gray-600">
+                  {{ Math.round(selectedFile.size / 1024) }} KB
+                </p>
+              </div>
+            </div>
+
+            <button
+              @click="removeFile"
+              class="w-10 h-10 rounded-full bg-white text-[#5c001f] flex items-center justify-center"
+            >
+              <X class="w-5 h-5" />
+            </button>
+          </div>
+
+          <div class="mt-7 flex justify-end">
+            <button
+              @click="goToReview"
+              :disabled="extracting"
+              class="bg-[#5c001f] text-white px-6 py-3 rounded-full font-bold flex items-center gap-2 disabled:opacity-60"
+            >
+              <Loader2 v-if="extracting" class="w-5 h-5 animate-spin" />
+              <ChevronRight v-else class="w-5 h-5" />
+              {{ extracting ? "Extracting with AI..." : "Extract with AI" }}
+            </button>
+          </div>
         </section>
 
-        <section v-if="mode === 'review'" class="bg-white rounded-[28px] p-7 shadow-lg border border-black/10">
-          <div class="flex items-center justify-between gap-4 mb-6">
+        <section
+          v-if="mode === 'review'"
+          class="bg-white rounded-[28px] p-7 shadow-lg border border-black/10"
+        >
+          <div class="flex items-center justify-between mb-6">
             <div>
-              <p class="text-sm font-bold text-[#5c001f] uppercase tracking-[0.18em]">Review Extracted Details</p>
-              <h2 class="text-[28px] font-bold">Step 3: Confirm Project Information</h2>
+              <p class="text-sm font-bold text-[#5c001f] uppercase tracking-[0.18em]">
+                Review Submission
+              </p>
+              <h2 class="text-[28px] font-bold">
+                Review AI Extracted Proposal Details
+              </h2>
             </div>
-            <span class="px-4 py-2 rounded-full bg-[#fff3c4] text-[#5c001f] font-bold text-sm">AI Extracted</span>
-          </div>
-          <div class="space-y-5">
-            <div><label class="block text-sm font-bold mb-2">Project Title</label><input v-model="form.projectTitle" class="w-full rounded-[16px] border border-[#d8c9bd] px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#f8be17]" /></div>
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-              <div><label class="block text-sm font-bold mb-2">Project Type</label><select v-model="form.projectType" class="w-full rounded-[16px] border border-[#d8c9bd] px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#f8be17]"><option>Development</option><option>Research</option></select></div>
-              <div><label class="block text-sm font-bold mb-2">Keywords</label><input v-model="form.keywords" class="w-full rounded-[16px] border border-[#d8c9bd] px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#f8be17]" /></div>
-            </div>
-            <div><label class="block text-sm font-bold mb-2">Project Members</label><textarea v-model="form.members" rows="4" class="w-full rounded-[16px] border border-[#d8c9bd] px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#f8be17]"></textarea></div>
-            <div><label class="block text-sm font-bold mb-2">Abstract / Problem Statement</label><textarea v-model="form.abstract" rows="6" class="w-full rounded-[16px] border border-[#d8c9bd] px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#f8be17]"></textarea></div>
-          </div>
-          <div class="mt-7 flex justify-between"><button @click="mode = 'upload'" class="bg-[#e7ded3] text-[#5c001f] px-6 py-3 rounded-full font-bold">Back</button><button @click="submitProposal" class="bg-[#5c001f] text-white px-6 py-3 rounded-full font-bold flex items-center gap-2"><Send class="w-4 h-4 text-[#f8be17]" /> Submit to Coordinator</button></div>
-        </section>
 
-        <section v-if="mode === 'submitted'" class="bg-white rounded-[28px] p-10 shadow-lg border border-black/10 text-center">
-          <CheckCircle2 class="w-20 h-20 mx-auto text-green-700" />
-          <h2 class="text-[30px] font-bold mt-4">Proposal Submitted</h2>
-          <p class="text-gray-600 mt-2">Your proposal has been sent to coordinator review.</p>
-          <div class="mt-6 inline-flex items-center gap-2 px-5 py-3 rounded-full bg-[#fff3c4] text-[#5c001f] font-bold"><ClipboardList class="w-5 h-5" /> Status: Pending Review</div>
-          <div class="mt-7"><button @click="mode = 'records'" class="bg-[#5c001f] text-white px-6 py-3 rounded-full font-bold">Go to My FYP</button></div>
+            <button
+              @click="mode = 'upload'"
+              class="text-[#5c001f] font-bold"
+            >
+              Back
+            </button>
+          </div>
+
+          <div class="space-y-4">
+            <div class="rounded-[18px] border border-[#e1d5cc] p-5">
+              <p class="text-xs uppercase tracking-[0.18em] font-bold text-[#5c001f]">
+                Project Title
+              </p>
+              <p class="text-xl font-bold mt-1">{{ form.projectTitle }}</p>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div class="rounded-[18px] border border-[#e1d5cc] p-5">
+                <p class="text-xs uppercase tracking-[0.18em] font-bold text-[#5c001f]">
+                  Project Type
+                </p>
+                <p class="font-bold mt-1">{{ form.projectType }}</p>
+              </div>
+
+              <div class="rounded-[18px] border border-[#e1d5cc] p-5">
+                <p class="text-xs uppercase tracking-[0.18em] font-bold text-[#5c001f]">
+                  Proposal File
+                </p>
+                <p class="font-bold mt-1">{{ selectedFile?.name || "-" }}</p>
+              </div>
+            </div>
+
+            <div class="rounded-[18px] border border-[#e1d5cc] p-5">
+              <p class="text-xs uppercase tracking-[0.18em] font-bold text-[#5c001f]">
+                Short Description
+              </p>
+              <p class="mt-2 text-gray-700 whitespace-pre-line">{{ form.abstract }}</p>
+            </div>
+
+            <div class="rounded-[18px] border border-[#e1d5cc] p-5">
+              <p class="text-xs uppercase tracking-[0.18em] font-bold text-[#5c001f]">
+                Keywords
+              </p>
+              <p class="mt-2 text-gray-700">{{ form.keywords || "-" }}</p>
+            </div>
+          </div>
+
+          <div class="mt-7 flex justify-end">
+            <button
+              @click="submitFypToDatabase"
+              :disabled="submitting"
+              class="bg-[#5c001f] text-white px-6 py-3 rounded-full font-bold flex items-center gap-2 disabled:opacity-60"
+            >
+              <Loader2 v-if="submitting" class="w-5 h-5 animate-spin" />
+              <Send v-else class="w-5 h-5" />
+              {{ submitting ? "Submitting..." : "Confirm & Submit" }}
+            </button>
+          </div>
         </section>
       </main>
     </div>
