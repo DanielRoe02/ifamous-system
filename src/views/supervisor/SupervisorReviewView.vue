@@ -28,6 +28,19 @@ const decisionSubmitted = ref(false);
 const submittedDecision = ref("");
 const project = ref(null);
 const feedback = ref("");
+const pendingDecision = ref(null);
+
+const decisionLabels = {
+  approve: "Approve Proposal",
+  revision: "Request Revision",
+  reject: "Reject Proposal",
+};
+
+const decisionStatusMap = {
+  approve: "Active",
+  revision: "Revision Required",
+  reject: "Rejected",
+};
 
 function getAuthToken() {
   return (
@@ -72,11 +85,22 @@ async function loadProject() {
     feedback.value = "";
     decisionSubmitted.value = false;
     submittedDecision.value = "";
+    pendingDecision.value = null;
   } catch (error) {
     errorMessage.value = error.message;
     project.value = null;
   } finally {
     loading.value = false;
+  }
+}
+
+function openDecisionConfirm(decision) {
+  pendingDecision.value = decision;
+}
+
+function closeDecisionConfirm() {
+  if (!submitting.value) {
+    pendingDecision.value = null;
   }
 }
 
@@ -111,6 +135,7 @@ async function submitDecision(decision) {
 
     submittedDecision.value = decision;
     decisionSubmitted.value = true;
+    pendingDecision.value = null;
     successMessage.value = data.message || "Decision submitted.";
 
     // reload project data after decision
@@ -182,24 +207,42 @@ onMounted(loadProject);
 
       <section
         v-if="decisionSubmitted"
-        class="bg-green-50 border border-green-200 rounded-[24px] p-6 text-green-800 font-bold"
+        class="bg-white rounded-[28px] p-10 shadow-lg border border-black/10 text-center"
       >
-        <div class="flex items-start gap-3">
-          <CheckCircle2 class="w-6 h-6 shrink-0" />
-          <div>
-            <p class="text-lg">
-              Decision has been submitted successfully.
-            </p>
-            <p class="text-sm mt-1 font-semibold">
-              The student and coordinator have been notified. You may return to Assigned Projects.
-            </p>
-            <button
-              @click="router.push('/supervisor-projects')"
-              class="mt-4 bg-[#5c001f] text-white px-5 py-2.5 rounded-full font-bold"
-            >
-              Back to Assigned Projects
-            </button>
+        <div class="mx-auto w-24 h-24 rounded-full bg-green-100 border border-green-200 flex items-center justify-center">
+          <CheckCircle2 class="w-14 h-14 text-green-700" />
+        </div>
+
+        <h2 class="text-[30px] font-bold text-[#5c001f] mt-6">
+          Supervisor Decision Submitted Successfully!
+        </h2>
+        <p class="text-gray-600 mt-3 max-w-2xl mx-auto">
+          The review decision has been saved into Aiven MySQL. Notification records have also been created for the student and coordinator.
+        </p>
+
+        <div class="mt-7 mx-auto max-w-2xl rounded-[22px] bg-[#f7f1ea] border border-[#e1d5cc] p-6 text-left">
+          <p class="text-sm font-bold uppercase tracking-[0.18em] text-[#5c001f]">Decision Summary</p>
+          <div class="mt-4 space-y-2 text-sm">
+            <p><b>Project:</b> {{ project?.title }}</p>
+            <p><b>Decision:</b> {{ decisionLabels[submittedDecision] }}</p>
+            <p><b>Status:</b> {{ project?.status || decisionStatusMap[submittedDecision] }}</p>
+            <p><b>Feedback:</b> {{ feedback || 'No feedback provided.' }}</p>
           </div>
+        </div>
+
+        <div class="mt-7 flex flex-wrap justify-center gap-3">
+          <button
+            @click="router.push('/supervisor-projects')"
+            class="bg-[#5c001f] text-white px-6 py-3 rounded-full font-bold"
+          >
+            View Updated Project List
+          </button>
+          <button
+            @click="router.push('/supervisor-dashboard')"
+            class="bg-[#e1d5cc] text-[#5c001f] px-6 py-3 rounded-full font-bold"
+          >
+            Back to Dashboard
+          </button>
         </div>
       </section>
 
@@ -270,7 +313,7 @@ onMounted(loadProject);
 
           <div class="mt-6 flex flex-wrap gap-3">
             <button
-              @click="submitDecision('approve')"
+              @click="openDecisionConfirm('approve')"
               :disabled="submitting"
               class="bg-green-600 text-white px-5 py-3 rounded-full font-bold flex items-center gap-2 disabled:opacity-60"
             >
@@ -279,7 +322,7 @@ onMounted(loadProject);
             </button>
 
             <button
-              @click="submitDecision('revision')"
+              @click="openDecisionConfirm('revision')"
               :disabled="submitting"
               class="bg-[#f8be17] text-[#5c001f] px-5 py-3 rounded-full font-bold flex items-center gap-2 disabled:opacity-60"
             >
@@ -288,7 +331,7 @@ onMounted(loadProject);
             </button>
 
             <button
-              @click="submitDecision('reject')"
+              @click="openDecisionConfirm('reject')"
               :disabled="submitting"
               class="bg-red-600 text-white px-5 py-3 rounded-full font-bold flex items-center gap-2 disabled:opacity-60"
             >
@@ -323,6 +366,70 @@ onMounted(loadProject);
             </p>
           </div>
         </aside>
+      </div>
+
+      <div
+        v-if="pendingDecision"
+        class="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4"
+      >
+        <div class="bg-white rounded-[28px] shadow-2xl max-w-2xl w-full overflow-hidden border border-[#e1d5cc]">
+          <div class="bg-[#5c001f] text-white p-6 flex items-center justify-between">
+            <div>
+              <p class="text-[#f8be17] font-bold uppercase tracking-[0.18em] text-sm">Supervisor Decision</p>
+              <h2 class="text-[28px] font-bold mt-1">Confirm Decision</h2>
+            </div>
+            <button
+              @click="closeDecisionConfirm"
+              class="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-white text-2xl"
+            >
+              ×
+            </button>
+          </div>
+
+          <div class="p-7 space-y-5">
+            <div class="rounded-[22px] bg-[#f7f1ea] border border-[#e1d5cc] p-5">
+              <p class="text-sm font-bold uppercase tracking-[0.15em] text-[#5c001f]">Student & Project</p>
+              <div class="mt-4 space-y-2 text-sm">
+                <p><b>Project Title:</b> {{ project?.title }}</p>
+                <p><b>Student:</b> {{ project?.studentName }} · {{ project?.matricNo }}</p>
+                <p><b>Current Status:</b> {{ project?.status }}</p>
+              </div>
+            </div>
+
+            <div
+              class="rounded-[22px] border p-5"
+              :class="pendingDecision === 'approve' ? 'bg-green-50 border-green-200' : pendingDecision === 'reject' ? 'bg-red-50 border-red-200' : 'bg-[#fff3c4] border-[#f8be17]'"
+            >
+              <p class="text-sm font-bold uppercase tracking-[0.15em] text-[#5c001f]">Selected Decision</p>
+              <h3 class="text-2xl font-bold text-[#5c001f] mt-3">
+                {{ decisionLabels[pendingDecision] }}
+              </h3>
+              <p class="text-sm mt-2">
+                New project status will become: <b>{{ decisionStatusMap[pendingDecision] }}</b>
+              </p>
+              <p class="text-sm mt-2">
+                Student and coordinator will receive notification after confirmation.
+              </p>
+            </div>
+
+            <div class="flex flex-wrap justify-end gap-3 pt-2">
+              <button
+                @click="closeDecisionConfirm"
+                class="bg-[#e1d5cc] text-[#5c001f] px-6 py-3 rounded-full font-bold"
+                :disabled="submitting"
+              >
+                Cancel
+              </button>
+              <button
+                @click="submitDecision(pendingDecision)"
+                class="bg-[#5c001f] text-white px-6 py-3 rounded-full font-bold disabled:opacity-60"
+                :disabled="submitting"
+              >
+                {{ submitting ? 'Submitting...' : 'Confirm Decision' }}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </main>
   </div>

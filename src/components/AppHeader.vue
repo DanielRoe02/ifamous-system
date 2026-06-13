@@ -67,6 +67,62 @@ const latestNotifications = computed(() => {
   return notifications.value.slice(0, 8)
 })
 
+const roleHomePath = computed(() => {
+  const roles = notificationRoles.value
+
+  if (roles.includes('Student') && !roles.includes('Coordinator') && !roles.includes('Supervisor')) {
+    return '/student-fyp'
+  }
+
+  if (roles.includes('Supervisor') && !roles.includes('Coordinator')) {
+    return '/supervisor-projects'
+  }
+
+  return '/manage-fyp'
+})
+
+const getNotificationTarget = (item) => {
+  const type = String(item?.recipientType || '').toLowerCase()
+  const projectId = item?.project_id || ''
+
+  if (type === 'student') {
+    return {
+      path: '/student-project-details',
+      query: projectId ? { projectId } : {},
+    }
+  }
+
+  if (type === 'supervisor') {
+    return {
+      path: '/supervisor-review',
+      query: projectId ? { projectId } : {},
+    }
+  }
+
+  if (type === 'coordinator') {
+    return {
+      path: '/manage-fyp',
+      query: { tab: 'records', ...(projectId ? { projectId } : {}) },
+    }
+  }
+
+  return { path: roleHomePath.value }
+}
+
+const notificationOpenLabel = computed(() => {
+  const roles = notificationRoles.value
+
+  if (roles.includes('Student') && !roles.includes('Coordinator') && !roles.includes('Supervisor')) {
+    return 'Open My FYP'
+  }
+
+  if (roles.includes('Supervisor') && !roles.includes('Coordinator')) {
+    return 'Open Assigned Projects'
+  }
+
+  return 'Open Manage FYP'
+})
+
 const formatTime = (dateString) => {
   if (!dateString) return ''
 
@@ -144,14 +200,7 @@ const openNotification = async (item) => {
   await markNotificationAsRead(item.notification_id)
 
   showNotifications.value = false
-
-  router.push({
-    path: '/manage-fyp',
-    query: {
-      tab: 'records',
-      projectId: item.project_id || '',
-    },
-  })
+  router.push(getNotificationTarget(item))
 }
 
 const toggleNotifications = async () => {
@@ -177,13 +226,7 @@ const handleLogout = () => {
 
 const goToManageFYP = () => {
   showNotifications.value = false
-
-  router.push({
-    path: '/manage-fyp',
-    query: {
-      tab: 'records',
-    },
-  })
+  router.push({ path: roleHomePath.value })
 }
 
 const handleClickOutside = (event) => {
@@ -356,7 +399,7 @@ onBeforeUnmount(() => {
                   </p>
 
                   <p class="text-xs text-[#5c001f] font-bold mt-2">
-                    Click to open project records
+                    Click to open related project
                   </p>
                 </div>
               </div>
@@ -368,7 +411,7 @@ onBeforeUnmount(() => {
               @click="goToManageFYP"
               class="w-full bg-[#5c001f] text-white px-4 py-3 rounded-full font-bold hover:bg-[#4a0019] transition-colors"
             >
-              Open Manage FYP
+              {{ notificationOpenLabel }}
             </button>
           </div>
         </div>
