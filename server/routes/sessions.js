@@ -1,9 +1,14 @@
+/**
+ * FYP session management routes
+ * handles session CRUD operations, active session toggling, and calendar data retrieval in SQL database
+ */
+
 const express = require("express");
 const db = require("../config/db");
 
 const router = express.Router();
 
-// GET all sessions
+// GET /api/sessions - get all FYP sessions from SQL database
 router.get("/sessions", (req, res) => {
   db.query("CALL sp_get_all_session()", (err, results) => {
     if (err) return res.status(500).json({ error: "Failed to fetch sessions: " + err.message });
@@ -11,7 +16,7 @@ router.get("/sessions", (req, res) => {
   });
 });
 
-// GET active session
+// GET /api/sessions/active - get currently active FYP session from SQL database
 router.get("/sessions/active", (req, res) => {
   db.query("CALL sp_get_all_session()", (err, results) => {
     if (err) return res.status(500).json({ error: "Failed to fetch active session: " + err.message });
@@ -22,7 +27,7 @@ router.get("/sessions/active", (req, res) => {
   });
 });
 
-// PUT set session as active
+// PUT /api/sessions/:id/active - set specified FYP session as active in SQL database
 router.put("/sessions/:id/active", (req, res) => {
   const sessionId = req.params.id;
   db.query("sp_SetActiveFYPSession(?)", [sessionId], (err, results) => {
@@ -31,7 +36,7 @@ router.put("/sessions/:id/active", (req, res) => {
   });
 });
 
-// GET single session
+// GET /api/sessions/:id - get single FYP session details from SQL database
 router.get("/sessions/:id", (req, res) => {
   const sessionId = req.params.id;
   db.query("CALL sp_select_session(?)", [sessionId], (err, results) => {
@@ -40,7 +45,7 @@ router.get("/sessions/:id", (req, res) => {
   });
 });
 
-// POST create new session
+// POST /api/sessions - create new FYP session in SQL database
 router.post("/sessions", (req, res) => {
   const { session_id } = req.body;
   if (!session_id) return res.status(400).json({ error: "Session ID (number) is required" });
@@ -51,7 +56,7 @@ router.post("/sessions", (req, res) => {
   });
 });
 
-// PUT update session
+// PUT /api/sessions/:id - update FYP session ID in SQL database
 router.put("/sessions/:id", (req, res) => {
   const old_id = req.params.id;
   const { new_session_id } = req.body;
@@ -63,7 +68,7 @@ router.put("/sessions/:id", (req, res) => {
   });
 });
 
-// DELETE session
+// DELETE /api/sessions/:id - delete FYP session from SQL database
 router.delete("/sessions/:id", (req, res) => {
   const session_id = req.params.id;
   db.query("CALL sp_delete_session(?)", [session_id], (err, results) => {
@@ -72,7 +77,7 @@ router.delete("/sessions/:id", (req, res) => {
   });
 });
 
-// GET full session data (timetables & projects)
+// GET /api/sessions/:id/data - get timetables and calendar data for specified FYP session from SQL database
 router.get("/sessions/:id/data", (req, res) => {
   const sessionId = req.params.id;
   db.query("CALL sp_GetSessionCalendarData(?)", [sessionId], (err, results) => {
