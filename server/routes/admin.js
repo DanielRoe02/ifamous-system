@@ -1,5 +1,11 @@
+/**
+ * admin management routes
+ * handles admin user listing, password resetting, and role management in SQL database
+ */
+
 const express = require("express");
 const db = require("../config/db").promise();
+const bcrypt = require("bcrypt");
 const router = express.Router();
 
 async function ensureAdminTable() {
@@ -11,6 +17,7 @@ async function ensureAdminTable() {
   `);
 }
 
+// GET /api/admin/users - get all users with assigned roles from SQL database
 router.get("/users", async (req, res) => {
   try {
     await ensureAdminTable();
@@ -83,6 +90,7 @@ router.get("/users", async (req, res) => {
   }
 });
 
+// POST /api/admin/users/:id/reset-password - reset user password in SQL database
 router.post("/users/:id/reset-password", async (req, res) => {
   try {
     const userId = req.params.id;
@@ -108,6 +116,7 @@ router.post("/users/:id/reset-password", async (req, res) => {
   }
 });
 
+// POST /api/admin/users/:id/roles - update user roles and permissions in SQL database
 router.post("/users/:id/roles", async (req, res) => {
   try {
     await ensureAdminTable();
