@@ -1,3 +1,8 @@
+/**
+ * student management routes
+ * handles student FYP proposal extraction, listing student projects, viewing project details, and submitting proposals in SQL database
+ */
+
 const express = require("express");
 const nodePath = require("path");
 const db = require("../config/db");
@@ -11,7 +16,7 @@ const {
 
 const router = express.Router();
 
-// Extract proposal text using AI
+// POST /api/student/extract-proposal - extract title, abstract, and keywords from uploaded proposal document using AI
 router.post("/student/extract-proposal", proposalUpload.single("proposal"), async (req, res) => {
   try {
     const userId = getTokenUserId(req);
@@ -51,7 +56,7 @@ router.post("/student/extract-proposal", proposalUpload.single("proposal"), asyn
   }
 });
 
-// GET my FYP projects
+// GET /api/student/my-fyp - get all FYP project records for logged-in student from SQL database
 router.get("/student/my-fyp", (req, res) => {
   const userId = getTokenUserId(req);
 
@@ -142,7 +147,7 @@ router.get("/student/my-fyp", (req, res) => {
   });
 });
 
-// GET single project details
+// GET /api/student/my-fyp/:projectId - get detailed FYP project info and submitted documents from SQL database
 router.get("/student/my-fyp/:projectId", (req, res) => {
   const userId = getTokenUserId(req);
   const projectId = req.params.projectId;
@@ -232,7 +237,7 @@ router.get("/student/my-fyp/:projectId", (req, res) => {
   });
 });
 
-// POST submit new project
+// POST /api/student/my-fyp - submit new FYP proposal metadata into SQL database
 router.post("/student/my-fyp", (req, res) => {
   const userId = getTokenUserId(req);
 
@@ -429,7 +434,7 @@ router.post("/student/my-fyp", (req, res) => {
   });
 });
 
-// POST submit proposal with uploaded file
+// POST /api/student/my-fyp-submit - submit new FYP proposal with file upload into SQL database
 router.post("/student/my-fyp-submit", savedProposalUpload.single("proposal"), (req, res) => {
   const userId = getTokenUserId(req);
 
