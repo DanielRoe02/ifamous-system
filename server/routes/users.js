@@ -69,12 +69,74 @@ router.get("/users/paginated", (req, res) => {
   });
 });
 
-// DELETE /api/users/:id - delete user from SQL database
-router.delete("/users/:id", (req, res) => {
-  db.query("DELETE FROM users WHERE user_id = ?", [req.params.id], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ message: "User deleted successfully" });
-  });
+// DELETE /api/users/:id - delete user and all associated role records from SQL database
+router.delete("/users/:id", async (req, res) => {
+  const userId = Number(req.params.id);
+  if (!userId) {
+    return res.status(400).json({ error: "Invalid user ID" });
+  }
+
+  const connection = await db.promise().getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    // 1. delete user roles
+    await connection.query("DELETE FROM admin WHERE user_id = ?", [userId]);
+    await connection.query("DELETE FROM coordinator WHERE user_id = ?", [userId]);
+    await connection.query("DELETE FROM supervisor WHERE supervisor_id = ?", [userId]);
+    await connection.query("DELETE FROM examiners WHERE examiners_id = ?", [userId]);
+    await connection.query("DELETE FROM students WHERE student_id = ?", [userId]);
+
+    // 2. delete timetable schedules
+    await connection.query("DELETE FROM time_table WHERE user_id = ?", [userId]);
+
+    // 3. update supervisor references in projects
+    await connection.query(
+      "UPDATE fyp_projects SET supervisor_user_id = NULL, supervisor_name = 'Not Assigned', supervisor_email = '' WHERE supervisor_user_id = ?",
+      [userId]
+    );
+
+    // 4. delete student projects and associated submissions, members, and notifications
+    const [userProjects] = await connection.query(
+      "SELECT project_id FROM fyp_projects WHERE student_user_id = ?",
+      [userId]
+    );
+
+    for (const proj of userProjects) {
+      await connection.query("DELETE FROM projects_submissions WHERE project_id = ?", [proj.project_id]);
+      await connection.query("DELETE FROM fyp_project_members WHERE project_id = ?", [proj.project_id]);
+      await connection.query("DELETE FROM fyp_notifications WHERE project_id = ?", [proj.project_id]);
+      await connection.query("DELETE FROM fyp_projects WHERE project_id = ?", [proj.project_id]);
+    }
+
+    // 5. clear submission review and grading references
+    await connection.query("UPDATE projects_submissions SET reviewed_by = NULL WHERE reviewed_by = ?", [userId]);
+    await connection.query("DELETE FROM grading_table WHERE grader_id = ?", [userId]);
+
+    // 6. delete recipient notifications by email
+    const [userRows] = await connection.query("SELECT email FROM users WHERE user_id = ? LIMIT 1", [userId]);
+    if (userRows.length > 0 && userRows[0].email) {
+      await connection.query("DELETE FROM fyp_notifications WHERE LOWER(recipient_email) = LOWER(?)", [userRows[0].email]);
+    }
+
+    // 7. delete user record from users table
+    const [result] = await connection.query("DELETE FROM users WHERE user_id = ?", [userId]);
+
+    await connection.commit();
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json({ success: true, message: "User deleted successfully" });
+  } catch (error) {
+    await connection.rollback();
+    console.error("Delete user transaction error:", error);
+    res.status(500).json({ error: "Failed to delete user: " + error.message });
+  } finally {
+    connection.release();
+  }
 });
 
 // POST /api/users - create new user in SQL database using stored procedure

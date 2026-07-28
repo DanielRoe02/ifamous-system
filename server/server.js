@@ -25,18 +25,41 @@ app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-// Ensure necessary database tables exist on startup
+// Ensure necessary database tables and ON DELETE CASCADE constraints exist on startup
 function ensureAdminTable() {
   db.query(
     `CREATE TABLE IF NOT EXISTS admin (
       user_id INT NOT NULL PRIMARY KEY,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_admin_user FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
     )`,
     (err) => {
-      if (err) console.error("Failed to ensure admin table:", err.message);
+      if (err && !err.message.includes("already exists")) {
+        // Fallback for simple table creation if constraint already exists
+        db.query(
+          `CREATE TABLE IF NOT EXISTS admin (
+            user_id INT NOT NULL PRIMARY KEY,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          )`
+        );
+      }
     }
   );
+
+  const cascadeStatements = [
+    "ALTER TABLE coordinator DROP FOREIGN KEY coordinator_ibfk_1, ADD CONSTRAINT coordinator_ibfk_1 FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE",
+    "ALTER TABLE examiners DROP FOREIGN KEY examiners_ibfk_1, ADD CONSTRAINT examiners_ibfk_1 FOREIGN KEY (examiners_id) REFERENCES users (user_id) ON DELETE CASCADE",
+    "ALTER TABLE students DROP FOREIGN KEY students_ibfk_1, ADD CONSTRAINT students_ibfk_1 FOREIGN KEY (student_id) REFERENCES users (user_id) ON DELETE CASCADE",
+    "ALTER TABLE supervisor DROP FOREIGN KEY supervisor_ibfk_1, ADD CONSTRAINT supervisor_ibfk_1 FOREIGN KEY (supervisor_id) REFERENCES users (user_id) ON DELETE CASCADE",
+  ];
+
+  cascadeStatements.forEach((sql) => {
+    db.query(sql, () => {
+      // Intentionally ignore error if constraint name differs or already altered
+    });
+  });
 }
+
 ensureAdminTable();
 
 // Mount Domain Routers
