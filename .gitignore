@@ -51,3 +51,4 @@ localData/media_to_test/FYP_Project_Schedule.pdf
 server/.env
 server/routes/*_backup_*.js
 server/*_backup_*.js
+/server/scripts

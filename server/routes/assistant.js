@@ -5,6 +5,9 @@ const mysql = require('mysql2');
 const bcrypt = require('bcrypt');
 const multer = require('multer');
 const Tesseract = require('tesseract.js');
+const fs = require('fs');
+const path = require('path');
+const { extractTimetableText } = require('../utils/doclingBridge');
 
 const router = express.Router();
 
@@ -732,18 +735,26 @@ router.post('/api/assistant/execute-user-creation', async (req, res) => {
 });
 
 router.post('/api/assistant/analyze-timetable', upload.single('image'), async (req, res) => {
+    let tempPath = null;
     try {
         if (!req.file) {
             return res.status(400).json({ error: 'No image provided' });
         }
 
-        console.log('Analyzing timetable image with OCR first...');
+        const tempDir = path.join(__dirname, '..', 'uploads', 'temp');
+        if (!fs.existsSync(tempDir)) {
+            fs.mkdirSync(tempDir, { recursive: true });
+        }
 
-        const {
-            data: { text },
-        } = await Tesseract.recognize(req.file.buffer, 'eng');
+        const safeFilename = `${Date.now()}_${String(req.file.originalname || 'timetable.png').replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+        tempPath = path.join(tempDir, safeFilename);
+        fs.writeFileSync(tempPath, req.file.buffer);
 
-        console.log('OCR Timetable Text:', text);
+        console.log('Analyzing timetable with Docling Table OCR / Tesseract Fallback...');
+
+        const { source, text } = await extractTimetableText(tempPath, req.file.buffer);
+
+        console.log(`Timetable Extracted Text Source: [${source}] Length: ${text?.length || 0}`);
 
         if (!text || text.trim().length < 10) {
             return res.status(400).json({
@@ -752,16 +763,16 @@ router.post('/api/assistant/analyze-timetable', upload.single('image'), async (r
             });
         }
 
-        const prompt = `You are an expert AI system that converts OCR text from a university timetable image into strict JSON.
+        const prompt = `You are an expert AI system that converts OCR and table structure markdown extracted from a university timetable image into strict JSON.
 
-The OCR text below was extracted from a timetable image:
+The extracted timetable text (Source: ${source}) is provided below:
 
 """
 ${text}
 """
 
 Your task:
-1. Determine whether the OCR text is from a timetable or schedule.
+1. Determine whether the extracted text is from a timetable or schedule.
 2. Extract the timetable owner if available.
 3. Extract weekly recurring schedule items.
 4. Return ONLY valid JSON. No markdown. No explanation.
@@ -802,7 +813,7 @@ Rules:
 - If the owner says TIMETABLE FOR LECTURER, target_type is "Lecturer".
 - If the owner says TIMETABLE FOR STUDENT GROUP or section, target_type is "Section Class".
 - If the owner cannot be found, use empty string for target_type and target_name.
-- If OCR has small mistakes, infer the most likely timetable meaning.
+- If OCR/Table text has small typos or formatting variations, infer the most likely timetable meaning.
 - Return JSON only.`;
 
         const reply = await runOllama(
@@ -857,6 +868,7 @@ Rules:
         return res.status(200).json({
             success: true,
             data: parsedJson,
+            ocrSource: source,
             ocrText: text,
         });
     } catch (error) {
@@ -866,6 +878,12 @@ Rules:
             success: false,
             error: 'AI Assistant is currently unavailable for image processing.',
         });
+    } finally {
+        if (tempPath && fs.existsSync(tempPath)) {
+            try {
+                fs.unlinkSync(tempPath);
+            } catch (_) {}
+        }
     }
 });
 
