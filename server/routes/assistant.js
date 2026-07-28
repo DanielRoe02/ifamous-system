@@ -1,3 +1,8 @@
+/**
+ * ai assistant routes
+ * handles chat assistant, profile card OCR, timetable Docling OCR, and user creation
+ */
+
 const express = require('express');
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
@@ -11,6 +16,7 @@ const { extractTimetableText } = require('../utils/doclingBridge');
 
 const router = express.Router();
 
+// check if SQL database SSL is required
 function shouldUseSsl() {
     return (
         process.env.DB_SSL === "true" ||
@@ -18,6 +24,7 @@ function shouldUseSsl() {
     );
 }
 
+// initialize SQL database connection
 const db = mysql.createConnection({
     host: process.env.DB_HOST,
     port: process.env.DB_PORT || 3306,
@@ -33,8 +40,10 @@ const db = mysql.createConnection({
 
 const JWT_SECRET = process.env.JWT_SECRET || 'ifamous-super-secret-key-2026';
 
+// multer memory storage for image file uploads
 const upload = multer({ storage: multer.memoryStorage() });
 
+// AI prompt defining persona and capabilities
 const SYSTEM_PROMPT = `You are the I-FAMOUS AI Assistant, a friendly and professional AI chatbot inside the Universiti Teknologi Malaysia (UTM) I-FAMOUS Final Year Project management system.
 
 Your main job:
@@ -77,11 +86,13 @@ If dates are unclear, ask the user for the missing information instead of guessi
 
 For normal questions, greetings, explanations, troubleshooting, and general chat, do not output JSON.`;
 
+// get latest user message from chat history
 function getLatestUserMessage(messages) {
     const latest = [...messages].reverse().find((message) => message.role === 'user');
     return latest?.content?.toLowerCase()?.trim() || '';
 }
 
+// check if user requested user account creation
 function userAskedToCreateUser(latestUserMessage) {
     return (
         /\b(create|add|register|make)\b.*\b(user|account|lecturer|staff|student|examiner|supervisor)\b/i.test(latestUserMessage) ||
@@ -92,6 +103,7 @@ function userAskedToCreateUser(latestUserMessage) {
     );
 }
 
+// check if user requested meeting scheduling
 function userAskedToSchedule(latestUserMessage) {
     return (
         /\b(schedule|auto schedule|auto-schedule|auto assign|auto-assign|arrange)\b.*\b(meeting|meetings|presentation|presentations|slot|slots)\b/i.test(latestUserMessage) ||
@@ -99,6 +111,7 @@ function userAskedToSchedule(latestUserMessage) {
     );
 }
 
+// remove action JSON from AI response text
 function removeActionJson(replyContent) {
     let cleanReply = replyContent
         .replace(/```json\s*\{[\s\S]*?"action"\s*:\s*"CREATE_USER"[\s\S]*?\}\s*```/gi, '')
@@ -114,6 +127,7 @@ function removeActionJson(replyContent) {
     return cleanReply;
 }
 
+// extract action JSON block from AI response
 function extractJsonBlock(replyContent) {
     const markdownMatch = replyContent.match(/```json\s*(\{[\s\S]*?\})\s*```/i);
 
@@ -130,6 +144,7 @@ function extractJsonBlock(replyContent) {
     return null;
 }
 
+// extract JSON object from text string
 function extractJsonFromText(replyContent) {
     let cleanReply = replyContent.trim();
 
@@ -149,22 +164,26 @@ function extractJsonFromText(replyContent) {
     return JSON.parse(cleanReply);
 }
 
+// extract email address from OCR text
 function extractEmail(rawText) {
     const match = rawText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
     return match ? match[0] : '';
 }
 
+// extract phone number from OCR text
 function extractPhone(rawText) {
     const match = rawText.match(/(\+?6?0[\d\s-]{8,15})/);
     return match ? match[0].replace(/\s+/g, '') : '';
 }
 
+// convert string to title case
 function titleCase(text) {
     return text
         .toLowerCase()
         .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+// extract name from OCR text
 function extractName(rawText) {
     const lines = rawText
         .split('\n')
@@ -197,6 +216,7 @@ function extractName(rawText) {
     return '';
 }
 
+// extract company name from OCR text
 function extractCompany(rawText) {
     const lowerAll = rawText.toLowerCase();
 
@@ -243,6 +263,7 @@ function extractCompany(rawText) {
     return '';
 }
 
+// extract affiliation or role from OCR text
 function extractAffiliation(rawText, email = '') {
     const lower = rawText.toLowerCase();
 
@@ -273,6 +294,7 @@ function extractAffiliation(rawText, email = '') {
     return 'Industry Expert';
 }
 
+// extract expertise areas from OCR text
 function extractExpertise(rawText) {
     const lower = rawText.toLowerCase();
     const expertise = [];
@@ -316,6 +338,7 @@ function extractExpertise(rawText) {
     return [...new Set(expertise)];
 }
 
+// extract profile details from OCR card text using AI
 async function extractProfileDataFromText(rawText) {
     const fallbackEmail = extractEmail(rawText);
     const fallbackData = {
@@ -387,6 +410,7 @@ Rules:
     return finalData;
 }
 
+// normalize user profile payload for user creation
 function normalizeCreateUserPayload(profileData) {
     return {
         action: 'CREATE_USER',
@@ -402,6 +426,7 @@ function normalizeCreateUserPayload(profileData) {
     };
 }
 
+// verify coordinator role permissions using JWT and SQL
 function verifyCoordinator(req, callback) {
     const authHeader = req.headers.authorization;
 
@@ -434,23 +459,7 @@ function verifyCoordinator(req, callback) {
     }
 }
 
-/*
-|--------------------------------------------------------------------------
-| AI Provider Function
-|--------------------------------------------------------------------------
-| Uses Ollama Cloud on Render when OLLAMA_API_KEY is available.
-|
-| Render Environment Variables:
-| OLLAMA_API_URL=https://ollama.com
-| OLLAMA_API_KEY=your_real_ollama_key
-| OLLAMA_MODEL=gemma4:31b-cloud
-| OLLAMA_CHAT_MODEL=gemma4:31b-cloud
-| OLLAMA_VISION_MODEL=gemma4:31b-cloud
-|
-| For local testing, you may put the same variables in server/.env.
-| server/.env is ignored by Git, so it will not be uploaded to GitHub.
-|--------------------------------------------------------------------------
-*/
+// execute Ollama AI API chat request
 async function runOllama(messages, mode = 'chat') {
     const selectedModel =
         mode === 'vision'
@@ -466,7 +475,6 @@ async function runOllama(messages, mode = 'chat') {
         },
     };
 
-    // Ollama Cloud for Render deployment
     if (process.env.OLLAMA_API_KEY) {
         const baseUrl = process.env.OLLAMA_API_URL || 'https://ollama.com';
 
@@ -484,11 +492,11 @@ async function runOllama(messages, mode = 'chat') {
         return ollamaCloudResponse.data.message?.content || '';
     }
 
-    // Local fallback for laptop development using local Ollama
     const ollamaResponse = await axios.post('http://localhost:11434/api/chat', ollamaPayload);
     return ollamaResponse.data.message?.content || '';
 }
 
+// POST /api/assistant/chat - handle AI assistant chatbot conversation and action triggers
 router.post('/api/assistant/chat', async (req, res) => {
     try {
         const { messages } = req.body;
@@ -679,6 +687,7 @@ router.post('/api/assistant/chat', async (req, res) => {
     }
 });
 
+// POST /api/assistant/execute-user-creation - create new user in SQL database after confirmation
 router.post('/api/assistant/execute-user-creation', async (req, res) => {
     try {
         verifyCoordinator(req, async (authErr) => {
@@ -734,6 +743,7 @@ router.post('/api/assistant/execute-user-creation', async (req, res) => {
     }
 });
 
+// POST /api/assistant/analyze-timetable - analyze timetable image using Docling Table OCR and AI
 router.post('/api/assistant/analyze-timetable', upload.single('image'), async (req, res) => {
     let tempPath = null;
     try {
@@ -887,6 +897,7 @@ Rules:
     }
 });
 
+// POST /api/assistant/extract-user-profile - extract profile details from name card image
 router.post('/api/assistant/extract-user-profile', upload.single('image'), async (req, res) => {
     try {
         if (!req.file) {

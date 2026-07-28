@@ -1,4 +1,7 @@
-// server/routes/supervisorMatching.js
+/**
+ * supervisor matching routes
+ * handles AI proposal field extraction, AI supervisor matching, supervisor assignment, FYP project listing, and notifications in SQL database
+ */
 
 const express = require("express");
 const db = require("../config/db").promise();
@@ -666,9 +669,7 @@ function formatProjectRecord(row) {
   };
 }
 
-// ------------------------------------------------------------
-// POST: Extract proposal fields from uploaded file
-// ------------------------------------------------------------
+// POST /api/supervisor-matching/extract-proposal - extract proposal fields from uploaded document using AI
 router.post(
   "/api/supervisor-matching/extract-proposal",
   upload.single("proposal"),
@@ -704,9 +705,7 @@ router.post(
   }
 );
 
-// ------------------------------------------------------------
-// POST: AI Supervisor Matching
-// ------------------------------------------------------------
+// POST /api/supervisor-matching/match - match supervisor candidates to FYP project using AI scoring
 router.post("/api/supervisor-matching/match", async (req, res) => {
   try {
     const project = req.body;
@@ -1013,8 +1012,7 @@ router.post("/api/supervisor-matching/assign", async (req, res) => {
 });
 
 
-// GET: Project records
-// ------------------------------------------------------------
+// GET /api/supervisor-matching/projects - get all FYP projects from SQL database for supervisor matching view
 router.get("/api/supervisor-matching/projects", async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -1298,9 +1296,7 @@ router.get("/api/supervisor-matching/notifications", async (req, res) => {
   }
 });
 
-// ------------------------------------------------------------
-// PATCH: Mark notification as read
-// ------------------------------------------------------------
+// PATCH /api/supervisor-matching/notifications/:notificationId/read - mark notification as read in SQL database
 router.patch("/api/supervisor-matching/notifications/:notificationId/read", async (req, res) => {
   try {
     const { notificationId } = req.params;
