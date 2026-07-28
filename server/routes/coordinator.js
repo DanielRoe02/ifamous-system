@@ -1,9 +1,14 @@
+/**
+ * coordinator management routes
+ * handles fetching coordinator FYP proposal queue and updating project status in SQL database
+ */
+
 const express = require("express");
 const db = require("../config/db");
 
 const router = express.Router();
 
-// GET coordinator FYP queue
+// GET /api/coordinator/fyp-queue - get all FYP proposals submitted to coordinator queue from SQL database
 router.get("/coordinator/fyp-queue", (req, res) => {
   const sql = `
     SELECT
@@ -76,7 +81,7 @@ router.get("/coordinator/fyp-queue", (req, res) => {
   });
 });
 
-// PATCH coordinator FYP status update
+// PATCH /api/coordinator/fyp-status/:projectId - update FYP project status and match score in SQL database
 router.patch("/coordinator/fyp-status/:projectId", (req, res) => {
   const projectId = req.params.projectId;
   const { status, matchScore } = req.body || {};
