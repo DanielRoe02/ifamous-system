@@ -1,3 +1,8 @@
+/**
+ * user management routes
+ * handles user listing, pagination, profile updates, autocomplete searching, and admin user role administration in SQL database
+ */
+
 const express = require("express");
 const bcrypt = require("bcrypt");
 const db = require("../config/db");
@@ -5,7 +10,7 @@ const { verifyAdmin } = require("../middleware/auth");
 
 const router = express.Router();
 
-// GET all users
+// GET /api/users - get all users from SQL database
 router.get("/users", (req, res) => {
   db.query("SELECT * FROM users", (err, results) => {
     if (err) return res.status(500).send(err);
@@ -13,7 +18,7 @@ router.get("/users", (req, res) => {
   });
 });
 
-// GET recent users by category
+// GET /api/users/recent - get recent users categorized by students, lecturers, and outsiders from SQL database
 router.get("/users/recent", (req, res) => {
   db.query("CALL sp_GetRecentUsersByCategory()", (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -25,7 +30,7 @@ router.get("/users/recent", (req, res) => {
   });
 });
 
-// GET paginated users
+// GET /api/users/paginated - get paginated user records filtered by category from SQL database
 router.get("/users/paginated", (req, res) => {
   const category = req.query.category;
   const page = parseInt(req.query.page) || 1;
@@ -64,7 +69,7 @@ router.get("/users/paginated", (req, res) => {
   });
 });
 
-// DELETE user
+// DELETE /api/users/:id - delete user from SQL database
 router.delete("/users/:id", (req, res) => {
   db.query("DELETE FROM users WHERE user_id = ?", [req.params.id], (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -72,7 +77,7 @@ router.delete("/users/:id", (req, res) => {
   });
 });
 
-// POST create user
+// POST /api/users - create new user in SQL database using stored procedure
 router.post("/users", async (req, res) => {
   const { email, password, full_name, phone_number, co_org_name, expertise, affiliation } = req.body;
   if (!email || !password || !full_name) {
@@ -96,7 +101,7 @@ router.post("/users", async (req, res) => {
   }
 });
 
-// PUT update user profile
+// PUT /api/users/:id - update user profile details in SQL database
 router.put("/users/:id", (req, res) => {
   const { full_name, email, phone_number, expertise, affiliation } = req.body;
   const userId = req.params.id;
@@ -129,7 +134,7 @@ router.put("/users/:id", (req, res) => {
   );
 });
 
-// Search API Endpoints for Autocomplete
+// GET /api/users/search - search non-student users for autocomplete
 router.get("/users/search", (req, res) => {
   const query = req.query.q;
   const sessionId = req.query.session_id;
@@ -141,6 +146,7 @@ router.get("/users/search", (req, res) => {
   });
 });
 
+// GET /api/classes/search - search FYP classes for autocomplete
 router.get("/classes/search", (req, res) => {
   const query = req.query.q;
   const sessionId = req.query.session_id;
@@ -152,7 +158,7 @@ router.get("/classes/search", (req, res) => {
   });
 });
 
-// --- ADMIN USER/ROLE MANAGEMENT APIs ---
+// GET /api/admin/users - get all users with admin role information from SQL database
 router.get("/admin/users", verifyAdmin, (req, res) => {
   const sql = `
     SELECT
@@ -190,6 +196,7 @@ router.get("/admin/users", verifyAdmin, (req, res) => {
   });
 });
 
+// PUT /api/admin/users/:id/roles - update user role permissions from admin panel in SQL database
 router.put("/admin/users/:id/roles", verifyAdmin, async (req, res) => {
   const userId = Number(req.params.id);
   const {
@@ -281,6 +288,7 @@ router.put("/admin/users/:id/roles", verifyAdmin, async (req, res) => {
   }
 });
 
+// PUT /api/admin/users/:id/password - reset user password from admin panel in SQL database
 router.put("/admin/users/:id/password", verifyAdmin, async (req, res) => {
   const userId = Number(req.params.id);
   const { newPassword } = req.body;
