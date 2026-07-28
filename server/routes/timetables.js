@@ -1,3 +1,8 @@
+/**
+ * timetable and schedule management routes
+ * handles timetable CRUD operations, schedule crosschecking, temporary meeting generation, and AI auto-scheduling in SQL database
+ */
+
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
@@ -7,7 +12,7 @@ const router = express.Router();
 
 const tempFilePath = path.join(__dirname, "..", "..", "localData", "temp_meeting.json");
 
-// POST create calendar schedule
+// POST /api/timetables - create new timetable schedule in SQL database
 router.post("/timetables", (req, res) => {
   const { fyp_session_id, user_id, class_id, schedule_json } = req.body;
 
@@ -32,7 +37,7 @@ router.post("/timetables", (req, res) => {
   );
 });
 
-// DELETE calendar schedule
+// DELETE /api/timetables/:id - delete timetable schedule from SQL database
 router.delete("/timetables/:id", (req, res) => {
   const timeTableId = req.params.id;
   db.query("CALL sp_DeleteCalendarSchedule(?)", [timeTableId], (err, results) => {
@@ -41,7 +46,7 @@ router.delete("/timetables/:id", (req, res) => {
   });
 });
 
-// PUT update calendar schedule
+// PUT /api/timetables/:id - update timetable schedule in SQL database
 router.put("/timetables/:id", (req, res) => {
   const timeTableId = req.params.id;
   const { user_id, class_id, schedule_json } = req.body;
@@ -63,7 +68,7 @@ router.put("/timetables/:id", (req, res) => {
   );
 });
 
-// POST crosscheck timetable data
+// POST /api/timetable/crosscheck - crosscheck class and user timetable schedules to detect slot conflicts
 router.post("/timetable/crosscheck", (req, res) => {
   const { fyp_session_id, class_id, user_ids } = req.body;
 
@@ -178,7 +183,7 @@ router.post("/timetable/crosscheck", (req, res) => {
     });
 });
 
-// POST temporary meeting generation
+// POST /api/timetable/generate-temp - save temporary generated meeting schedule to JSON file storage
 router.post("/timetable/generate-temp", (req, res) => {
   const { project, date, start_time, end_time, duration } = req.body;
 
@@ -218,7 +223,7 @@ router.post("/timetable/generate-temp", (req, res) => {
   }
 });
 
-// GET temporary meeting
+// GET /api/timetable/temp - get saved temporary meeting schedules from JSON file storage
 router.get("/timetable/temp", (req, res) => {
   try {
     if (fs.existsSync(tempFilePath)) {
@@ -235,7 +240,7 @@ router.get("/timetable/temp", (req, res) => {
   }
 });
 
-// DELETE temporary meeting
+// DELETE /api/timetable/temp - delete temporary meeting schedules from JSON file storage
 router.delete("/timetable/temp", (req, res) => {
   try {
     const id = req.query.id;
@@ -255,7 +260,7 @@ router.delete("/timetable/temp", (req, res) => {
   }
 });
 
-// POST: AI Auto-scheduling for all FYP projects
+// POST /api/timetable/auto-assign - run AI auto-scheduling algorithm for FYP project presentations
 router.post("/timetable/auto-assign", async (req, res) => {
   let {
     fyp_session_id,
