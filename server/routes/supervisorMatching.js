@@ -1,7 +1,7 @@
 // server/routes/supervisorMatching.js
 
 const express = require("express");
-const mysql = require("mysql2/promise");
+const db = require("../config/db").promise();
 const multer = require("multer");
 const mammoth = require("mammoth");
 const pdfParseModule = require("pdf-parse");
@@ -19,29 +19,6 @@ const upload = multer({
   limits: {
     fileSize: 15 * 1024 * 1024,
   },
-});
-
-function shouldUseSsl() {
-  return (
-    process.env.DB_SSL === "true" ||
-    String(process.env.DB_HOST || "").includes("aivencloud.com")
-  );
-}
-
-const db = mysql.createPool({
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT || 3306,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  ssl: shouldUseSsl()
-    ? {
-        rejectUnauthorized: false,
-      }
-    : undefined,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
 });
 
 // ------------------------------------------------------------
