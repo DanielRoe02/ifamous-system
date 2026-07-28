@@ -1,3 +1,8 @@
+/**
+ * supervisor management routes
+ * handles supervisor dashboard stats, assigned FYP project listing, document downloading, and review decisions in SQL database
+ */
+
 const express = require("express");
 const nodeFs = require("fs");
 const nodePath = require("path");
@@ -6,7 +11,7 @@ const { getTokenUserId } = require("../middleware/auth");
 
 const router = express.Router();
 
-// GET supervisor dashboard
+// GET /api/supervisor/dashboard - get supervisor dashboard metrics, capacity, and project list from SQL database
 router.get("/supervisor/dashboard", (req, res) => {
   const userId = getTokenUserId(req);
 
@@ -98,7 +103,7 @@ router.get("/supervisor/dashboard", (req, res) => {
   });
 });
 
-// GET supervisor projects
+// GET /api/supervisor/projects - get assigned FYP projects for supervisor from SQL database
 router.get("/supervisor/projects", (req, res) => {
   const userId = getTokenUserId(req);
 
@@ -146,7 +151,7 @@ router.get("/supervisor/projects", (req, res) => {
   });
 });
 
-// GET project review details for supervisor
+// GET /api/supervisor/review/:projectId - get project details and submitted proposal documents for supervisor review from SQL database
 router.get("/supervisor/review/:projectId", (req, res) => {
   const userId = getTokenUserId(req);
   const projectId = req.params.projectId;
@@ -230,7 +235,7 @@ router.get("/supervisor/review/:projectId", (req, res) => {
   });
 });
 
-// Download proposal document
+// GET /api/supervisor/review/:projectId/document/:submissionId - download proposal document file from server storage
 router.get("/supervisor/review/:projectId/document/:submissionId", (req, res) => {
   const userId = getTokenUserId(req);
   const { projectId, submissionId } = req.params;
@@ -267,7 +272,7 @@ router.get("/supervisor/review/:projectId/document/:submissionId", (req, res) =>
   });
 });
 
-// Submit proposal review decision
+// POST /api/supervisor/review/:projectId/decision - submit supervisor review decision (approve, revision, reject) to SQL database
 router.post("/supervisor/review/:projectId/decision", (req, res) => {
   const userId = getTokenUserId(req);
   const projectId = req.params.projectId;
