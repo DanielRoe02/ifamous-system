@@ -1,3 +1,8 @@
+/**
+ * authentication routes
+ * handles database connection status check, user registration, and user login with JWT tokens
+ */
+
 const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
@@ -6,7 +11,7 @@ const { JWT_SECRET } = require("../middleware/auth");
 
 const router = express.Router();
 
-// Status API Endpoint
+// GET /api/status - check database connection status
 router.get("/status", (req, res) => {
   db.query("SELECT 1", (err) => {
     if (err)
@@ -15,7 +20,7 @@ router.get("/status", (req, res) => {
   });
 });
 
-// Signup API Endpoint
+// POST /api/signup - register new student, staff, or external user in SQL database
 router.post("/signup", async (req, res) => {
   const {
     email,
@@ -145,7 +150,7 @@ router.post("/signup", async (req, res) => {
   }
 });
 
-// Login API Endpoint
+// POST /api/login - authenticate user login, verify password, and return JWT token with roles
 router.post("/login", (req, res) => {
   const { email, password } = req.body;
 
