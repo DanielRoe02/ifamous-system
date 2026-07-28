@@ -1,28 +1,6 @@
 const express = require("express");
-const mysql = require("mysql2/promise");
-const bcrypt = require("bcrypt");
-
+const db = require("../config/db").promise();
 const router = express.Router();
-
-function shouldUseSsl() {
-  return (
-    process.env.DB_SSL === "true" ||
-    String(process.env.DB_HOST || "").includes("aivencloud.com")
-  );
-}
-
-const db = mysql.createPool({
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT || 3306,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  ssl: shouldUseSsl()
-    ? {
-        rejectUnauthorized: false,
-      }
-    : undefined,
-});
 
 async function ensureAdminTable() {
   await db.query(`
