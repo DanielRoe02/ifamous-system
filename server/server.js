@@ -14,6 +14,7 @@ const studentRoutes = require("./routes/student");
 const supervisorRoutes = require("./routes/supervisor");
 const coordinatorRoutes = require("./routes/coordinator");
 const adminRoutes = require("./routes/admin");
+const notificationRoutes = require("./routes/notifications");
 const assistantRouter = require("./routes/assistant");
 const supervisorMatchingRouter = require("./routes/supervisorMatching");
 
@@ -46,6 +47,7 @@ app.use("/api", userRoutes);
 app.use("/api", studentRoutes);
 app.use("/api", supervisorRoutes);
 app.use("/api", coordinatorRoutes);
+app.use("/api", notificationRoutes);
 app.use("/api/admin", adminRoutes);
 
 // Mount Existing Feature Routers
