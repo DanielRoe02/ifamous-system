@@ -67,6 +67,25 @@ const latestNotifications = computed(() => {
   return notifications.value.slice(0, 8)
 })
 
+const dashboardPath = computed(() => {
+  const u = currentUser.value
+  const roles = notificationRoles.value
+
+  if (u.is_admin || u.role_info?.is_admin) {
+    return '/admin-dashboard'
+  }
+
+  if (roles.includes('Student') && !roles.includes('Coordinator') && !roles.includes('Supervisor')) {
+    return '/student-dashboard'
+  }
+
+  if (roles.includes('Supervisor') && !roles.includes('Coordinator')) {
+    return '/supervisor-dashboard'
+  }
+
+  return '/dashboard'
+})
+
 const roleHomePath = computed(() => {
   const roles = notificationRoles.value
 
@@ -80,6 +99,10 @@ const roleHomePath = computed(() => {
 
   return '/manage-fyp'
 })
+
+const goToDashboard = () => {
+  router.push(dashboardPath.value)
+}
 
 const getNotificationTarget = (item) => {
   const type = String(item?.recipientType || '').toLowerCase()
@@ -263,7 +286,11 @@ onBeforeUnmount(() => {
     class="bg-[#5C001F] w-full h-[100px] lg:h-[70px] px-[20px] py-[8px] flex items-center justify-between shrink-0 shadow-sm relative z-50"
   >
     <!-- Left side -->
-    <div class="flex items-center gap-[15px] shrink-0">
+    <div
+      class="flex items-center gap-[15px] shrink-0 cursor-pointer "
+      @click="goToDashboard"
+      title="Go to Dashboard"
+    >
       <div
         class="h-[71.186px] lg:h-[45px] overflow-clip relative shrink-0 w-[210px] lg:w-[133px] flex items-center"
       >
