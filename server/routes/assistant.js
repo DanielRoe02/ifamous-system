@@ -455,7 +455,10 @@ function verifyCoordinator(req, callback) {
             }
         );
     } catch (jwtErr) {
-        return callback(new Error('Security Error: Invalid or expired authentication token.'));
+        if (jwtErr.name === 'TokenExpiredError') {
+            return callback(new Error('Security Error: SESSION_EXPIRED - Session expired. Please log in again.'));
+        }
+        return callback(new Error('Security Error: Invalid authentication token or signature.'));
     }
 }
 
