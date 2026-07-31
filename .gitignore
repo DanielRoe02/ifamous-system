@@ -52,3 +52,8 @@ server/.env
 server/routes/*_backup_*.js
 server/*_backup_*.js
 /server/scripts
+
+# User-uploaded journey and feedback files
+/server/uploads/journey/
+server/.env.*
+!server/.env.example

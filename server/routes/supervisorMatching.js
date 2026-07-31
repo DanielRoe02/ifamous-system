@@ -8,6 +8,8 @@ const db = require("../config/db").promise();
 const multer = require("multer");
 const mammoth = require("mammoth");
 const pdfParseModule = require("pdf-parse");
+const { authenticateToken, requireAnyRole } = require("../middleware/auth");
+const { notifyUser, notifyCoordinators } = require("../utils/innovationNotifications");
 
 const router = express.Router();
 
@@ -29,21 +31,24 @@ const upload = multer({
 // ------------------------------------------------------------
 async function getLecturerCandidates() {
   const [rows] = await db.query(`
-    SELECT 
-      user_id,
-      full_name,
-      email,
-      phone_number,
-      expertise,
-      affiliation,
-      co_org_name,
-      is_utm_staff
-    FROM users
-    WHERE expertise IS NOT NULL
-      AND TRIM(expertise) <> ''
-      AND is_utm_staff = 1
-      AND LOWER(full_name) NOT LIKE '%coordinator%'
-    ORDER BY full_name ASC
+    SELECT
+      u.user_id,
+      u.full_name,
+      u.email,
+      u.phone_number,
+      COALESCE(NULLIF(s.research_expertise, ''), NULLIF(u.expertise, ''), 'General academic supervision') AS expertise,
+      COALESCE(u.affiliation, u.co_org_name, up.organisation, 'Universiti Teknologi Malaysia') AS affiliation,
+      u.is_utm_staff,
+      COALESCE(s.sv_capacity, 5) AS sv_capacity,
+      COALESCE(s.current_capacity, 0) AS current_capacity,
+      COALESCE(up.is_available, 1) AS is_available
+    FROM supervisor s
+    JOIN users u ON u.user_id = s.supervisor_id
+    LEFT JOIN user_profiles up ON up.user_id = u.user_id
+    WHERE COALESCE(up.is_available, 1) = 1
+      AND COALESCE(s.current_capacity, 0) < COALESCE(s.sv_capacity, 5)
+      AND LOWER(u.full_name) NOT LIKE '%coordinator%'
+    ORDER BY COALESCE(s.current_capacity, 0), u.full_name ASC
     LIMIT 30
   `);
 
@@ -53,8 +58,11 @@ async function getLecturerCandidates() {
     email: row.email || "-",
     phone: row.phone_number || "-",
     expertise: row.expertise || "General academic supervision",
-    affiliation: row.affiliation || row.co_org_name || "Universiti Teknologi Malaysia",
+    affiliation: row.affiliation || "Universiti Teknologi Malaysia",
     is_utm_staff: row.is_utm_staff,
+    sv_capacity: Number(row.sv_capacity || 5),
+    current_capacity: Number(row.current_capacity || 0),
+    available: Number(row.is_available || 0) === 1 && Number(row.current_capacity || 0) < Number(row.sv_capacity || 5),
   }));
 }
 
@@ -137,7 +145,10 @@ function simpleFallbackMatch(project, lecturers) {
       phone: lecturer.phone,
       expertise: lecturer.expertise,
       score,
-      workload: "Available",
+      workload: `${lecturer.current_capacity || 0} / ${lecturer.sv_capacity || 5}`,
+      capacity: lecturer.sv_capacity || 5,
+      currentCapacity: lecturer.current_capacity || 0,
+      available: lecturer.available !== false,
       recentProjects: [
         "Academic Management System",
         "Student Monitoring Dashboard",
@@ -150,8 +161,9 @@ function simpleFallbackMatch(project, lecturers) {
   });
 
   return scored
+    .filter((item) => item.available !== false)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 3)
+    .slice(0, 10)
     .map((item, index) => ({
       ...item,
       rank: index + 1,
@@ -196,7 +208,7 @@ Important:
 A proposal may be an individual project or a group project. Match the supervisor based on the PROJECT CONTENT, not based on the number of students.
 
 Your task:
-Rank the best 3 supervisors for the FYP project based on project title, abstract, keywords, and lecturer expertise.
+Rank up to the best 10 eligible supervisors for the FYP project based on project title, abstract, keywords, lecturer expertise, availability, and current workload.
 
 Project members:
 ${membersText}
@@ -237,7 +249,7 @@ JSON format:
 
 Rules:
 - Score must be between 0 and 100.
-- Rank must be 1, 2, and 3.
+- Rank must start at 1 and increase sequentially. Return up to 10 candidates when available.
 - Use only lecturers from the candidate list.
 - Match based on semantic relevance, not exact keywords only.
 - If project involves AI, NLP, recommendation, automation, or data analysis, prioritize lecturers with AI/ML/Data expertise.
@@ -287,28 +299,36 @@ Rules:
       throw new Error("AI response is not an array");
     }
 
-    return parsed.slice(0, 3).map((item, index) => ({
-      rank: index + 1,
-      user_id: item.user_id || null,
-      name: item.name || "Unknown Lecturer",
-      title: item.title || "Lecturer",
-      faculty: item.faculty || "Faculty of Computing",
-      department: item.department || "Software Engineering",
-      email: item.email || "-",
-      phone: item.phone || "-",
-      expertise: item.expertise || "General academic supervision",
-      score: Number(item.score) || 75,
-      workload: item.workload || "Available",
-      recentProjects: Array.isArray(item.recentProjects)
-        ? item.recentProjects
-        : ["Academic Management System", "Student Dashboard", "Assessment Platform"],
-      reason:
-        item.reason ||
-        "This lecturer is recommended based on project similarity and lecturer expertise.",
-      status:
-        item.status ||
-        (index === 0 ? "Best Match" : index === 1 ? "Recommended" : "Alternative"),
-    }));
+    return parsed.slice(0, 10).map((item, index) => {
+      const source = lecturers.find((lecturer) => Number(lecturer.user_id) === Number(item.user_id))
+        || lecturers.find((lecturer) => String(lecturer.name).toLowerCase() === String(item.name || "").toLowerCase())
+        || {};
+      return {
+        rank: index + 1,
+        user_id: item.user_id || source.user_id || null,
+        name: item.name || source.name || "Unknown Lecturer",
+        title: item.title || "Lecturer",
+        faculty: item.faculty || source.affiliation || "Faculty of Computing",
+        department: item.department || "Software Engineering",
+        email: item.email || source.email || "-",
+        phone: item.phone || source.phone || "-",
+        expertise: item.expertise || source.expertise || "General academic supervision",
+        score: Number(item.score) || 75,
+        workload: `${source.current_capacity || 0} / ${source.sv_capacity || 5}`,
+        capacity: source.sv_capacity || 5,
+        currentCapacity: source.current_capacity || 0,
+        available: source.available !== false,
+        recentProjects: Array.isArray(item.recentProjects)
+          ? item.recentProjects
+          : ["Academic Management System", "Student Dashboard", "Assessment Platform"],
+        reason:
+          item.reason ||
+          "This lecturer is recommended based on project similarity and lecturer expertise.",
+        status:
+          item.status ||
+          (index === 0 ? "Best Match" : index < 3 ? "Recommended" : "Alternative"),
+      };
+    });
   } catch (parseError) {
     console.error("Failed to parse Ollama JSON:", parseError);
     console.error("Raw AI text:", aiText);
@@ -672,6 +692,8 @@ function formatProjectRecord(row) {
 // POST /api/supervisor-matching/extract-proposal - extract proposal fields from uploaded document using AI
 router.post(
   "/api/supervisor-matching/extract-proposal",
+  authenticateToken,
+  requireAnyRole("student", "coordinator"),
   upload.single("proposal"),
   async (req, res) => {
     try {
@@ -706,7 +728,7 @@ router.post(
 );
 
 // POST /api/supervisor-matching/match - match supervisor candidates to FYP project using AI scoring
-router.post("/api/supervisor-matching/match", async (req, res) => {
+router.post("/api/supervisor-matching/match", authenticateToken, requireAnyRole("student", "coordinator"), async (req, res) => {
   try {
     const project = req.body;
 
@@ -720,44 +742,40 @@ router.post("/api/supervisor-matching/match", async (req, res) => {
     let lecturers = await getLecturerCandidates();
 
     if (!lecturers.length) {
-      lecturers = [
-        {
-          user_id: 4017,
-          name: "Ts. Dr. Wong Mei Ling",
-          email: "wong.meiling@utm.my",
-          phone: "+60 13-555 6789",
-          expertise: "Artificial Intelligence, Machine Learning, Data Analytics",
-          affiliation: "Faculty of Computing",
-          is_utm_staff: 1,
-        },
-        {
-          user_id: 4019,
-          name: "Dr. David Kumar",
-          email: "david.kumar@utm.my",
-          phone: "+60 12-444 8912",
-          expertise: "Software Engineering, Web Application, System Architecture",
-          affiliation: "Faculty of Computing",
-          is_utm_staff: 1,
-        },
-        {
-          user_id: 4020,
-          name: "Dr. Lim Wei Jie",
-          email: "lim.weijie@utm.my",
-          phone: "+60 11-222 7634",
-          expertise: "Database Systems, Academic Information Systems, Automation",
-          affiliation: "Faculty of Computing",
-          is_utm_staff: 1,
-        },
-      ];
+      return res.status(404).json({
+        success: false,
+        error: "No eligible supervisors are currently available for nomination or assignment.",
+        code: "NO_ELIGIBLE_SUPERVISORS",
+      });
     }
 
     const recommendations = await ollamaSupervisorMatch(project, lecturers);
 
+    const isStudentRequest = Number(req.user?.is_student || 0) === 1 && Number(req.user?.is_coordinator || 0) !== 1;
+    const safeRecommendations = isStudentRequest
+      ? recommendations.map((item) => ({
+          rank: item.rank,
+          user_id: item.user_id,
+          name: item.name,
+          faculty: item.faculty,
+          department: item.department,
+          expertise: item.expertise,
+          score: item.score,
+          reason: item.reason,
+          status: item.status,
+          workload: item.workload,
+          capacity: item.capacity,
+          currentCapacity: item.currentCapacity,
+          available: item.available !== false,
+        }))
+      : recommendations;
+
     res.json({
       success: true,
       source: OLLAMA_API_KEY ? "ollama" : "fallback",
+      audience: isStudentRequest ? "student-nomination" : "coordinator-assignment",
       project,
-      recommendations,
+      recommendations: safeRecommendations,
     });
   } catch (error) {
     console.error("Supervisor matching route error:", error);
@@ -774,7 +792,7 @@ router.post("/api/supervisor-matching/match", async (req, res) => {
 // POST: Assign supervisor to project
 // Workflow 6, 7, 8, 9
 // ------------------------------------------------------------
-router.post("/api/supervisor-matching/assign", async (req, res) => {
+router.post("/api/supervisor-matching/assign", authenticateToken, requireAnyRole("coordinator"), async (req, res) => {
   const connection = await db.getConnection();
 
   try {
@@ -821,6 +839,7 @@ router.post("/api/supervisor-matching/assign", async (req, res) => {
           supervisor_expertise = ?,
           match_score = ?,
           status = 'Pending Supervisor Approval',
+          current_phase = 'Supervisor Review', progress_percent = 25, risk_status = 'On Track',
           updated_at = NOW()
         WHERE project_id = ?
         `,
@@ -910,79 +929,38 @@ router.post("/api/supervisor-matching/assign", async (req, res) => {
 
     const savedProject = projectRows[0] || {};
 
-    // Supervisor notification
-    await connection.execute(
-      `
-      INSERT INTO fyp_notifications (
-        project_id,
-        recipient_type,
-        recipient_name,
-        recipient_email,
-        title,
-        message,
-        is_read,
-        created_at
-      )
-      VALUES (?, 'Supervisor', ?, ?, ?, ?, 0, NOW())
-      `,
-      [
-        finalProjectId,
-        supervisor.name || "Supervisor",
-        supervisor.email || "",
-        "New FYP Supervision Assignment",
-        `You have been assigned to supervise the project "${savedProject.project_title || project.projectTitle}".`,
-      ]
-    );
-
-    // Coordinator notification
-    await connection.execute(
-      `
-      INSERT INTO fyp_notifications (
-        project_id,
-        recipient_type,
-        recipient_name,
-        recipient_email,
-        title,
-        message,
-        is_read,
-        created_at
-      )
-      VALUES (?, 'Coordinator', 'Coordinator', '', ?, ?, 0, NOW())
-      `,
-      [
-        finalProjectId,
-        "Supervisor Assignment Completed",
-        `You assigned ${supervisor.name} as supervisor for the project "${savedProject.project_title || project.projectTitle}".`,
-      ]
-    );
-
-    // Student notification
-    if (savedProject.student_user_id || savedProject.student_email) {
-      await connection.execute(
-        `
-        INSERT INTO fyp_notifications (
-          project_id,
-          recipient_type,
-          recipient_name,
-          recipient_email,
-          title,
-          message,
-          is_read,
-          created_at
-        )
-        VALUES (?, 'Student', ?, ?, ?, ?, 0, NOW())
-        `,
-        [
-          finalProjectId,
-          savedProject.student_name || "Student",
-          savedProject.student_email || "",
-          "FYP Supervisor Assigned",
-          `Your project "${savedProject.project_title || project.projectTitle}" has been assigned to ${supervisor.name}.`,
-        ]
-      );
-    }
-
     await connection.commit();
+
+    const sendEmail = req.body.sendEmail;
+    const notifications = await Promise.all([
+      notifyUser({
+        projectId: finalProjectId,
+        userId: supervisor.user_id,
+        recipientType: "Supervisor",
+        title: "New FYP Supervision Assignment",
+        message: `You have been assigned to supervise the project "${savedProject.project_title || project.projectTitle}".`,
+        sendEmail,
+        actionPath: `/supervisor-review?projectId=${finalProjectId}`,
+      }),
+      savedProject.student_user_id
+        ? notifyUser({
+            projectId: finalProjectId,
+            userId: savedProject.student_user_id,
+            recipientType: "Student",
+            title: "FYP Supervisor Assigned",
+            message: `Your project "${savedProject.project_title || project.projectTitle}" has been assigned to ${supervisor.name}.`,
+            sendEmail,
+            actionPath: `/student-project-details?projectId=${finalProjectId}`,
+          })
+        : null,
+      notifyCoordinators({
+        projectId: finalProjectId,
+        title: "Supervisor Assignment Completed",
+        message: `You assigned ${supervisor.name} as supervisor for the project "${savedProject.project_title || project.projectTitle}".`,
+        sendEmail,
+        actionPath: `/coordinator-project-details?projectId=${finalProjectId}`,
+      }),
+    ]);
 
     res.json({
       success: true,
@@ -994,6 +972,10 @@ router.post("/api/supervisor-matching/assign", async (req, res) => {
         supervisorEmail: supervisor.email || "",
         matchScore: Number(supervisor.score) || 0,
         status: "Pending Supervisor Approval",
+      },
+      notification: {
+        supervisorEmail: notifications[0]?.emailStatus || "Not Requested",
+        studentEmail: notifications[1]?.emailStatus || "Not Requested",
       },
     });
   } catch (error) {
@@ -1013,7 +995,7 @@ router.post("/api/supervisor-matching/assign", async (req, res) => {
 
 
 // GET /api/supervisor-matching/projects - get all FYP projects from SQL database for supervisor matching view
-router.get("/api/supervisor-matching/projects", async (req, res) => {
+router.get("/api/supervisor-matching/projects", authenticateToken, requireAnyRole("coordinator"), async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT

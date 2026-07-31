@@ -4,6 +4,7 @@ const cors = require("cors");
 require("dotenv").config();
 
 const db = require("./config/db");
+const { ensureNotificationEmailSchema } = require("./utils/notificationSchema");
 
 // Import Route Modules
 const authRoutes = require("./routes/auth");
@@ -17,6 +18,11 @@ const adminRoutes = require("./routes/admin");
 const notificationRoutes = require("./routes/notifications");
 const assistantRouter = require("./routes/assistant");
 const supervisorMatchingRouter = require("./routes/supervisorMatching");
+const journeyRoutes = require("./routes/journey");
+const examinerRoutes = require("./routes/examiner");
+const examinerAssignmentRoutes = require("./routes/examinerAssignment");
+const profileRoutes = require("./routes/profile");
+const supervisorAssessmentRoutes = require("./routes/supervisorAssessment");
 
 const app = express();
 
@@ -72,10 +78,27 @@ app.use("/api", supervisorRoutes);
 app.use("/api", coordinatorRoutes);
 app.use("/api", notificationRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api", journeyRoutes);
+app.use("/api", examinerRoutes);
+app.use("/api", examinerAssignmentRoutes);
+app.use("/api", profileRoutes);
+app.use("/api", supervisorAssessmentRoutes);
 
 // Mount Existing Feature Routers
 app.use(assistantRouter);
 app.use(supervisorMatchingRouter);
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
+
+async function startServer() {
+  try {
+    await ensureNotificationEmailSchema();
+    console.log("Notification email schema ready");
+  } catch (error) {
+    console.warn("Notification email schema check failed:", error.message);
+  }
+
+  app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
+}
+
+startServer();

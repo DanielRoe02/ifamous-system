@@ -5,8 +5,12 @@
 
 const express = require("express");
 const db = require("../config/db");
+const { authenticateToken, requireAnyRole } = require("../middleware/auth");
+const { workflowStateForStatus } = require("../utils/workflowState");
 
 const router = express.Router();
+
+router.use("/coordinator", authenticateToken, requireAnyRole("coordinator"));
 
 // GET /api/coordinator/fyp-queue - get all FYP proposals submitted to coordinator queue from SQL database
 router.get("/coordinator/fyp-queue", (req, res) => {
@@ -27,8 +31,10 @@ router.get("/coordinator/fyp-queue", (req, res) => {
       fp.status,
       fp.created_at,
       fp.updated_at,
+      ps.submission_id,
       ps.original_file_name,
       ps.file_path,
+      ps.mime_type,
       ps.submission_type,
       ps.status AS submission_status,
       ps.submitted_at
@@ -69,7 +75,9 @@ router.get("/coordinator/fyp-queue", (req, res) => {
       status: row.status || "Pending Coordinator Review",
       proposalStatus: row.submission_status || "pending",
       aiStatus: row.match_score ? "AI Completed" : "Pending AI Matching",
-      fileName: row.original_file_name || row.file_path || "Proposal document",
+      submissionId: row.submission_id || null,
+      fileName: row.original_file_name || row.file_path || "No proposal document",
+      mimeType: row.mime_type || "application/octet-stream",
       submittedAt: row.submitted_at || row.created_at,
       updatedAt: row.updated_at,
     }));
@@ -108,15 +116,19 @@ router.patch("/coordinator/fyp-status/:projectId", (req, res) => {
     return res.status(400).json({ success: false, error: "Invalid project status" });
   }
 
+  const workflow = workflowStateForStatus(status, 0);
   const sql = `
     UPDATE fyp_projects
     SET status = ?,
         match_score = COALESCE(?, match_score),
+        current_phase = ?,
+        progress_percent = GREATEST(COALESCE(progress_percent, 0), ?),
+        risk_status = ?,
         updated_at = NOW()
     WHERE project_id = ?
   `;
 
-  db.query(sql, [status, matchScore || null, projectId], (err, result) => {
+  db.query(sql, [status, matchScore || null, workflow.phase, workflow.progress, workflow.risk, projectId], (err, result) => {
     if (err) {
       return res.status(500).json({ success: false, error: err.message });
     }

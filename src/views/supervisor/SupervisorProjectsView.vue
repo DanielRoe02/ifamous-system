@@ -11,6 +11,9 @@ import {
   RefreshCw,
 } from "lucide-vue-next";
 import AppHeader from "@/components/AppHeader.vue";
+import RoleSidebar from "@/components/RoleSidebar.vue";
+import { openSupervisorProject, supervisorProjectAction } from "@/utils/supervisorProjectNavigation";
+import { formatMalaysiaDate } from "@/utils/dateTime";
 
 const router = useRouter();
 
@@ -32,18 +35,6 @@ function getAuthToken() {
     sessionStorage.getItem("token") ||
     ""
   );
-}
-
-function formatDate(value) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-
-  return date.toLocaleDateString("en-MY", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
 }
 
 function statusClass(status) {
@@ -91,12 +82,11 @@ async function loadProjects() {
 }
 
 function reviewProject(project) {
-  router.push({
-    path: "/supervisor-review",
-    query: {
-      projectId: project.project_id,
-    },
-  });
+  openSupervisorProject(router, project);
+}
+
+function actionLabel(project) {
+  return supervisorProjectAction(project).label;
 }
 
 onMounted(loadProjects);
@@ -107,39 +97,7 @@ onMounted(loadProjects);
     <AppHeader />
 
     <div class="flex">
-      <aside class="w-[240px] bg-[#f7f1ea] border-r border-[#d8c9bd] min-h-[calc(100vh-70px)] p-4">
-        <div class="bg-white/80 border border-[#e1d5cc] rounded-[18px] p-4 mb-4">
-          <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#5c001f]">
-            Supervisor
-          </p>
-          <p class="text-sm text-gray-600 mt-1">Review Workspace</p>
-        </div>
-
-        <nav class="space-y-2">
-          <button
-            @click="router.push('/supervisor-dashboard')"
-            class="w-full hover:bg-white text-[#2b1b1b] rounded-[14px] px-4 py-3 flex items-center gap-3 font-bold"
-          >
-            <LayoutDashboard class="w-5 h-5 text-[#5c001f]" />
-            Dashboard
-          </button>
-
-          <button
-            class="w-full bg-[#5c001f] text-white rounded-[14px] px-4 py-3 flex items-center gap-3 font-bold"
-          >
-            <FolderKanban class="w-5 h-5 text-[#f8be17]" />
-            Assigned Projects
-          </button>
-
-          <button
-            @click="router.push('/supervisor-logbook')"
-            class="w-full hover:bg-white text-[#2b1b1b] rounded-[14px] px-4 py-3 flex items-center gap-3 font-bold"
-          >
-            <BookOpenCheck class="w-5 h-5 text-[#5c001f]" />
-            Logbook
-          </button>
-        </nav>
-      </aside>
+      <RoleSidebar role="Staff" />
 
       <main class="flex-1 p-8 space-y-7">
         <section class="rounded-[32px] bg-[#5c001f] text-white p-8 shadow-xl relative overflow-hidden">
@@ -239,7 +197,7 @@ onMounted(loadProjects);
                     {{ project.matchScore ? project.matchScore + '%' : '-' }}
                   </td>
 
-                  <td>{{ formatDate(project.lastUpdated) }}</td>
+                  <td>{{ formatMalaysiaDate(project.lastUpdated) }}</td>
 
                   <td class="text-right pr-5">
                     <button
@@ -247,7 +205,7 @@ onMounted(loadProjects);
                       class="bg-[#5c001f] text-white px-4 py-2 rounded-full font-bold inline-flex items-center gap-2"
                     >
                       <Eye class="w-4 h-4" />
-                      Review
+                      {{ actionLabel(project) }}
                     </button>
                   </td>
                 </tr>

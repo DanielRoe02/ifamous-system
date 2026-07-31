@@ -9,7 +9,8 @@ import {
   FolderKanban,
   FileDown,
   FileUp,
-  BrainCircuit,
+  Sparkles,
+  UserRoundCheck,
   Settings,
 } from 'lucide-vue-next'
 
@@ -58,9 +59,15 @@ const navItems = [
     enabled: true,
   },
   {
+    label: 'Assign Examiner',
+    path: '/examiner-assignment',
+    icon: UserRoundCheck,
+    enabled: true,
+  },
+  {
     label: 'AI Assistant',
     path: '/dashboard',
-    icon: BrainCircuit,
+    icon: Sparkles,
     enabled: false,
   },
   {
@@ -141,11 +148,11 @@ const navigateTo = (item) => {
     <div class="px-4 pb-5">
       <div class="rounded-[18px] bg-[#5c001f] p-4 text-white">
         <div class="flex items-center gap-2">
-          <BrainCircuit class="w-5 h-5 text-[#f8be17]" />
+          <Sparkles class="w-5 h-5 text-[#f8be17]" />
           <p class="font-bold text-sm">AI Ready</p>
         </div>
         <p class="text-xs text-white/70 mt-2">
-          Supervisor matching module coming next.
+          Supervisor and examiner AI matching are available.
         </p>
       </div>
     </div>

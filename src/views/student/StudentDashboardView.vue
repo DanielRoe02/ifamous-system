@@ -2,6 +2,9 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppHeader from '@/components/AppHeader.vue'
+import RoleSidebar from '@/components/RoleSidebar.vue'
+import { nextActionForStatus, workflowStep } from '@/utils/fypWorkflow'
+import { formatMalaysiaDate } from '@/utils/dateTime'
 import {
   Bell,
   BookOpenCheck,
@@ -47,18 +50,6 @@ function getStoredUser() {
   }
 }
 
-function formatDate(value) {
-  if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '-'
-
-  return date.toLocaleDateString('en-MY', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  })
-}
-
 const currentProject = computed(() => records.value[0] || null)
 
 const displayName = computed(() => {
@@ -74,30 +65,11 @@ const pendingReviewCount = computed(() =>
   ).length
 )
 
-const progressStep = computed(() => {
-  const status = String(currentStatus.value || '').toLowerCase()
-
-  if (status.includes('active')) return 3
-  if (status.includes('revision') || status.includes('rejected')) return 2
-  if (status.includes('supervisor approval')) return 2
-  if (status.includes('assignment')) return 2
-  if (status.includes('matching')) return 2
-  if (status.includes('coordinator') || status.includes('pending')) return 1
-  return currentProject.value ? 1 : 0
-})
+const progressStep = computed(() => currentProject.value ? workflowStep(currentStatus.value) : 0)
 
 const nextAction = computed(() => {
-  const status = String(currentStatus.value || '').toLowerCase()
-
   if (!currentProject.value) return 'Create and submit your FYP proposal'
-  if (status.includes('coordinator')) return 'Wait for coordinator review'
-  if (status.includes('matching')) return 'Wait for AI matching'
-  if (status.includes('assignment')) return 'Wait for supervisor assignment'
-  if (status.includes('supervisor approval')) return 'Wait for supervisor approval'
-  if (status.includes('active')) return 'Continue project progress and logbook'
-  if (status.includes('revision')) return 'Revise proposal based on supervisor feedback'
-  if (status.includes('rejected')) return 'Create a new proposal or contact coordinator'
-  return 'Check your latest FYP status'
+  return nextActionForStatus(currentStatus.value)
 })
 
 const overviewCards = computed(() => [
@@ -118,10 +90,10 @@ const overviewCards = computed(() => [
   },
   {
     label: 'Logbook',
-    value: String(currentStatus.value).toLowerCase().includes('active') ? 'Open' : '-',
-    note: String(currentStatus.value).toLowerCase().includes('active')
-      ? 'Available now'
-      : 'Available after approval',
+    value: progressStep.value >= 3 && progressStep.value < 5 ? 'Open' : '-',
+    note: progressStep.value >= 3 && progressStep.value < 5
+      ? 'Available during development'
+      : progressStep.value === 5 ? 'Project completed' : 'Available after proposal approval',
   },
 ])
 
@@ -131,14 +103,14 @@ const activities = computed(() => {
   if (currentProject.value) {
     items.push({
       text: `${currentProject.value.title} status: ${currentProject.value.status}`,
-      date: formatDate(currentProject.value.lastUpdated),
+      date: formatMalaysiaDate(currentProject.value.lastUpdated),
     })
   }
 
   notifications.value.slice(0, 4).forEach((item) => {
     items.push({
       text: item.title || item.message,
-      date: formatDate(item.createdAt),
+      date: formatMalaysiaDate(item.createdAt),
     })
   })
 
@@ -204,24 +176,7 @@ onMounted(loadDashboard)
     <AppHeader />
 
     <div class="flex">
-      <aside class="w-[240px] bg-[#f7f1ea] border-r border-[#d8c9bd] min-h-[calc(100vh-70px)] p-4">
-        <div class="bg-white/80 border border-[#e1d5cc] rounded-[18px] p-4 mb-4">
-          <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#5c001f]">Student</p>
-          <p class="text-sm text-gray-600 mt-1">FYP Workspace</p>
-        </div>
-
-        <nav class="space-y-2">
-          <button class="w-full bg-[#5c001f] text-white rounded-[14px] px-4 py-3 flex items-center gap-3 font-bold">
-            <LayoutDashboard class="w-5 h-5 text-[#f8be17]" /> Dashboard
-          </button>
-          <button @click="router.push('/student-fyp')" class="w-full hover:bg-white text-[#2b1b1b] rounded-[14px] px-4 py-3 flex items-center gap-3 font-bold">
-            <FolderKanban class="w-5 h-5 text-[#5c001f]" /> My FYP
-          </button>
-          <button @click="router.push('/student-logbook')" class="w-full hover:bg-white text-[#2b1b1b] rounded-[14px] px-4 py-3 flex items-center gap-3 font-bold">
-            <BookOpenCheck class="w-5 h-5 text-[#5c001f]" /> Logbook
-          </button>
-        </nav>
-      </aside>
+      <RoleSidebar role="Student" />
 
       <main class="flex-1 p-8 space-y-7">
         <section class="rounded-[32px] bg-[#5c001f] text-white p-8 shadow-xl relative overflow-hidden">

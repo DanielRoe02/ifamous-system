@@ -14,7 +14,6 @@ import {
   AlertTriangle,
   UserPlus,
   UploadCloud,
-  BrainCircuit,
   FileDown,
   Clock,
   CheckCircle2,
@@ -114,7 +113,7 @@ onMounted(() => {
                 @click="goTo('/manage-fyp')"
                 class="bg-white/10 text-white px-6 py-3 rounded-full font-bold hover:bg-white/20 transition-colors border border-white/20 flex items-center gap-2"
               >
-                <BrainCircuit class="w-5 h-5 text-[#f8be17]" />
+                <Sparkles class="w-5 h-5 text-[#f8be17]" />
                 Manage FYP
               </button>
             </div>
@@ -181,7 +180,7 @@ onMounted(() => {
                 </p>
                 <h3 class="text-[28px] font-bold text-[#5c001f] mt-2">Supervisor Matching</h3>
               </div>
-              <BrainCircuit class="w-12 h-12 text-[#5c001f]" />
+              <Sparkles class="w-12 h-12 text-[#5c001f]" />
             </div>
             <p class="text-[#5c001f]/80 mt-4 text-sm leading-relaxed">
               Next prototype module: upload or enter proposal details, compare with lecturer
@@ -357,7 +356,7 @@ onMounted(() => {
 
               <div class="flex gap-4">
                 <div class="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
-                  <BrainCircuit class="w-5 h-5 text-blue-700" />
+                  <Sparkles class="w-5 h-5 text-blue-700" />
                 </div>
                 <div>
                   <p class="font-bold text-sm">AI workflow prepared</p>

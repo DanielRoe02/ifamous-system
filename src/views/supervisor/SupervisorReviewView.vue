@@ -1,16 +1,23 @@
 <script setup>
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   ArrowLeft,
   CheckCircle2,
+  Clock3,
   Download,
+  Eye,
   FileText,
   Loader2,
+  Paperclip,
   Send,
   XCircle,
 } from "lucide-vue-next";
 import AppHeader from "@/components/AppHeader.vue";
+import RoleSidebar from "@/components/RoleSidebar.vue";
+import EmailNotificationToggle from "@/components/EmailNotificationToggle.vue";
+import { feedbackFileUrl, fileUrl } from "@/services/ifamousApi";
+import { formatMalaysiaDateTime } from "@/utils/dateTime";
 
 const route = useRoute();
 const router = useRouter();
@@ -29,6 +36,14 @@ const submittedDecision = ref("");
 const project = ref(null);
 const feedback = ref("");
 const pendingDecision = ref(null);
+const correctionFile = ref(null);
+const sendEmailNotification = ref(true);
+
+const projectStatus = computed(() => String(project.value?.status || "").trim());
+const isReadOnlyDecision = computed(() => projectStatus.value === "Rejected");
+const isWaitingRevision = computed(() => projectStatus.value === "Revision Required");
+const isRevisedSubmission = computed(() => projectStatus.value === "Revised Proposal Submitted");
+const canMakeDecision = computed(() => !isReadOnlyDecision.value && !isWaitingRevision.value);
 
 const decisionLabels = {
   approve: "Approve Proposal",
@@ -82,7 +97,22 @@ async function loadProject() {
     }
 
     project.value = data.project;
+
+    const reviewStatuses = new Set([
+      "Assigned",
+      "Pending Supervisor Approval",
+      "Pending Review",
+      "Revision Required",
+      "Revised Proposal Submitted",
+      "Rejected",
+    ]);
+    if (!reviewStatuses.has(String(project.value?.status || ""))) {
+      router.replace({ path: "/project-journey", query: { projectId } });
+      return;
+    }
+
     feedback.value = "";
+    correctionFile.value = null;
     decisionSubmitted.value = false;
     submittedDecision.value = "";
     pendingDecision.value = null;
@@ -95,6 +125,7 @@ async function loadProject() {
 }
 
 function openDecisionConfirm(decision) {
+  sendEmailNotification.value = true;
   pendingDecision.value = decision;
 }
 
@@ -112,18 +143,22 @@ async function submitDecision(decision) {
   successMessage.value = "";
 
   try {
+    const formData = new FormData();
+    formData.append("decision", decision);
+    formData.append("feedback", feedback.value || "");
+    formData.append("sendEmail", String(sendEmailNotification.value));
+    if (correctionFile.value) {
+      formData.append("attachment", correctionFile.value);
+    }
+
     const response = await fetch(
       `${API_BASE}/api/supervisor/review/${project.value.project_id}/decision`,
       {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${getAuthToken()}`,
         },
-        body: JSON.stringify({
-          decision,
-          feedback: feedback.value,
-        }),
+        body: formData,
       }
     );
 
@@ -151,15 +186,14 @@ async function submitDecision(decision) {
   }
 }
 
+function previewDocument(doc) {
+  if (!project.value || !doc?.submission_id) return;
+  window.open(fileUrl(project.value.project_id, doc.submission_id), "_blank", "noopener");
+}
+
 function downloadDocument(doc) {
   if (!project.value || !doc?.submission_id) return;
-
-  const token = getAuthToken();
-
-  window.open(
-    `${API_BASE}/api/supervisor/review/${project.value.project_id}/document/${doc.submission_id}?token=${encodeURIComponent(token)}`,
-    "_blank"
-  );
+  window.open(fileUrl(project.value.project_id, doc.submission_id, true), "_blank", "noopener");
 }
 
 onMounted(loadProject);
@@ -169,7 +203,9 @@ onMounted(loadProject);
   <div class="min-h-screen bg-[#e7ded3] text-black font-['Inter']">
     <AppHeader />
 
-    <main class="max-w-6xl mx-auto p-8 space-y-7">
+    <div class="flex">
+      <RoleSidebar role="Staff" />
+      <main class="flex-1 max-w-6xl mx-auto p-8 space-y-7 min-w-0">
       <button
         @click="router.push('/supervisor-projects')"
         class="inline-flex items-center gap-2 text-[#5c001f] font-bold"
@@ -186,7 +222,10 @@ onMounted(loadProject);
           {{ project?.title || "Project Review" }}
         </h1>
         <p class="text-white/80 mt-2">
-          Review assigned proposal and submit approve, revision, or rejection decision.
+          <span v-if="isWaitingRevision">Revision requested. Monitor the feedback sent and wait for the student to upload a new proposal version.</span>
+          <span v-else-if="isRevisedSubmission">A revised proposal version is ready. Review the newest document before making another decision.</span>
+          <span v-else-if="isReadOnlyDecision">Read-only decision history for this rejected proposal.</span>
+          <span v-else>Review the assigned proposal and submit an approval, revision, or rejection decision.</span>
         </p>
       </section>
 
@@ -227,6 +266,7 @@ onMounted(loadProject);
             <p><b>Decision:</b> {{ decisionLabels[submittedDecision] }}</p>
             <p><b>Status:</b> {{ project?.status || decisionStatusMap[submittedDecision] }}</p>
             <p><b>Feedback:</b> {{ feedback || 'No feedback provided.' }}</p>
+            <p><b>Correction attachment:</b> {{ correctionFile?.name || 'None' }}</p>
           </div>
         </div>
 
@@ -262,18 +302,28 @@ onMounted(loadProject);
                   <div>
                     <p class="font-bold">{{ doc.fileName }}</p>
                     <p class="text-sm text-gray-600">
-                      {{ doc.type }} · {{ doc.status }}
+                      {{ doc.type }} · Version {{ doc.version || 1 }} · {{ doc.status }}
                     </p>
+                    <p class="text-xs text-gray-500 mt-1">Submitted {{ formatMalaysiaDateTime(doc.submittedAt, { includeYear: true }) }}</p>
                   </div>
                 </div>
 
-                <button
-                  @click="downloadDocument(doc)"
-                  class="bg-[#5c001f] text-white px-4 py-2 rounded-full font-bold flex items-center gap-2"
-                >
-                  <Download class="w-4 h-4" />
-                  Download
-                </button>
+                <div class="flex gap-2">
+                  <button
+                    @click="previewDocument(doc)"
+                    class="border border-[#5c001f] text-[#5c001f] px-4 py-2 rounded-full font-bold flex items-center gap-2"
+                  >
+                    <Eye class="w-4 h-4" />
+                    View
+                  </button>
+                  <button
+                    @click="downloadDocument(doc)"
+                    class="bg-[#5c001f] text-white px-4 py-2 rounded-full font-bold flex items-center gap-2"
+                  >
+                    <Download class="w-4 h-4" />
+                    Download
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -301,7 +351,43 @@ onMounted(loadProject);
             </div>
           </div>
 
-          <div class="mt-6">
+          <div v-if="project.feedback?.length" class="mt-6 rounded-[20px] border border-[#e1d5cc] bg-white p-5">
+            <h3 class="text-xl font-bold flex items-center gap-2"><Paperclip class="w-5 h-5 text-[#5c001f]" /> Revision feedback history</h3>
+            <div class="mt-4 space-y-3">
+              <article v-for="item in project.feedback" :key="item.feedback_id" class="rounded-[16px] bg-[#f7f1ea] border border-[#e1d5cc] p-4">
+                <div class="flex flex-wrap justify-between gap-2">
+                  <p class="font-bold">Supervisor feedback</p>
+                  <p class="text-xs text-gray-500">{{ formatMalaysiaDateTime(item.created_at, { includeYear: true }) }}</p>
+                </div>
+                <p class="mt-2 whitespace-pre-line">{{ item.comment || 'No written comment.' }}</p>
+                <a v-if="item.attachment_path" :href="feedbackFileUrl(project.project_id, item.feedback_id, true)" class="mt-3 inline-flex items-center gap-2 rounded-xl bg-[#5c001f] px-4 py-2 font-bold text-white">
+                  <Download class="w-4 h-4" /> {{ item.attachment_name || 'Download correction attachment' }}
+                </a>
+              </article>
+            </div>
+          </div>
+
+          <div v-if="isReadOnlyDecision" class="mt-6 rounded-[18px] border border-red-200 bg-red-50 p-5 text-red-800">
+            <p class="font-bold">Rejected proposal — read-only history</p>
+            <p class="text-sm mt-1">This proposal cannot enter the development journey or receive another decision. The existing document and feedback remain available for reference.</p>
+          </div>
+
+          <div v-else-if="isWaitingRevision" class="mt-6 rounded-[18px] border border-amber-300 bg-amber-50 p-5 text-amber-900">
+            <div class="flex items-start gap-3">
+              <Clock3 class="w-6 h-6 shrink-0" />
+              <div>
+                <p class="font-bold text-lg">Waiting for student revision</p>
+                <p class="text-sm mt-1">The revision request has already been sent. Another supervisor decision is disabled until the student uploads a revised proposal version.</p>
+                <p class="text-sm mt-2">When the student resubmits, the status will change to <b>Revised Proposal Submitted</b> and this page will enable the decision buttons again.</p>
+              </div>
+            </div>
+          </div>
+
+          <div v-else class="mt-6">
+            <div v-if="isRevisedSubmission" class="mb-5 rounded-[18px] border border-green-200 bg-green-50 p-5 text-green-800">
+              <p class="font-bold">Revised proposal received</p>
+              <p class="text-sm mt-1">Review the newest proposal version at the top of the document list. You may approve it, request another revision, or reject it.</p>
+            </div>
             <label class="block font-bold mb-2">Comments / Feedback</label>
             <textarea
               v-model="feedback"
@@ -309,9 +395,19 @@ onMounted(loadProject);
               class="w-full rounded-[16px] border border-[#d8c9bd] px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#f8be17]"
               placeholder="Write feedback for the student..."
             ></textarea>
+            <label class="block font-bold mt-4 mb-2">Correction attachment (optional)</label>
+            <input
+              type="file"
+              @change="correctionFile = $event.target.files?.[0] || null"
+              class="w-full rounded-[16px] border border-[#d8c9bd] bg-white px-4 py-3"
+              accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp,.txt"
+            />
+            <p v-if="correctionFile" class="text-sm text-gray-600 mt-2">
+              Selected: {{ correctionFile.name }}
+            </p>
           </div>
 
-          <div class="mt-6 flex flex-wrap gap-3">
+          <div v-if="canMakeDecision" class="mt-6 flex flex-wrap gap-3">
             <button
               @click="openDecisionConfirm('approve')"
               :disabled="submitting"
@@ -410,7 +506,12 @@ onMounted(loadProject);
               <p class="text-sm mt-2">
                 Student and coordinator will receive notification after confirmation.
               </p>
+              <p v-if="correctionFile" class="text-sm mt-2 font-bold">
+                Attachment: {{ correctionFile.name }}
+              </p>
             </div>
+
+            <EmailNotificationToggle v-model="sendEmailNotification" />
 
             <div class="flex flex-wrap justify-end gap-3 pt-2">
               <button
@@ -431,6 +532,7 @@ onMounted(loadProject);
           </div>
         </div>
       </div>
-    </main>
+      </main>
+    </div>
   </div>
 </template>

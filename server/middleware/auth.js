@@ -15,7 +15,7 @@ function getTokenUserId(req) {
   const authHeader = req.headers.authorization || "";
   const token = authHeader.startsWith("Bearer ")
     ? authHeader.slice(7)
-    : authHeader;
+    : authHeader || req.query?.access_token || req.query?.token || null;
 
   if (!token) return null;
 
@@ -29,11 +29,13 @@ function getTokenUserId(req) {
 
 /**
  * Middleware to authenticate any valid JWT token.
- * Validates token structure, signature, and expiration (2 hours).
+ * Validates token structure, signature, and expiration (configured by the login token, currently 24 hours).
  */
 function authenticateToken(req, res, next) {
   const authHeader = req.headers.authorization || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
+  const token = authHeader.startsWith("Bearer ")
+    ? authHeader.slice(7)
+    : authHeader || req.query?.access_token || null;
 
   if (!token) {
     return res.status(401).json({ error: "Missing authentication token", code: "MISSING_TOKEN" });
@@ -90,11 +92,24 @@ function verifyAdmin(req, res, next) {
   }
 }
 
+function requireAnyRole(...allowedRoles) {
+  return (req, res, next) => {
+    const user = req.user || {};
+    const allowed = allowedRoles.some((role) => Number(user[`is_${role}`] || 0) === 1);
+    if (allowed || Number(user.is_admin || 0) === 1) return next();
+    return res.status(403).json({
+      error: `Required role: ${allowedRoles.join(" or ")}`,
+      code: "ROLE_FORBIDDEN",
+    });
+  };
+}
+
 module.exports = {
   JWT_SECRET,
   getTokenUserId,
   authenticateToken,
   verifyAdmin,
   verifyTokenPayload,
+  requireAnyRole,
 };
 

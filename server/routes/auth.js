@@ -20,7 +20,70 @@ router.get("/status", (req, res) => {
   });
 });
 
-// POST /api/signup - register new student, staff, or external user in SQL database
+function detectAccountType(email) {
+  const normalized = String(email || "").trim().toLowerCase();
+  if (normalized.endsWith("@graduate.utm.my")) return "student";
+  if (normalized.endsWith("@utm.my")) return "staff";
+  return "external";
+}
+
+async function assignDetectedRoles(connection, {
+  userId,
+  accountType,
+  metricNumber,
+  cgpa,
+  totalCreditHour,
+  creditHourProofName,
+  expertise,
+  workloadCapacity,
+  affiliation,
+}) {
+  if (accountType === "student") {
+    await connection.query(
+      `INSERT INTO students
+        (student_id, metric_number, CGPA, proof_of_credit_hours, credit_hours_completed)
+       VALUES (?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+        metric_number = VALUES(metric_number),
+        CGPA = VALUES(CGPA),
+        proof_of_credit_hours = VALUES(proof_of_credit_hours),
+        credit_hours_completed = VALUES(credit_hours_completed)`,
+      [
+        userId,
+        String(metricNumber).trim().toUpperCase(),
+        Number(cgpa),
+        creditHourProofName || "Proof uploaded during signup",
+        Number(totalCreditHour),
+      ]
+    );
+    return ["Student"];
+  }
+
+  if (accountType === "staff") {
+    const capacity = Math.max(1, Number(workloadCapacity || 5));
+    const expertiseText = String(expertise || "General academic supervision").trim();
+    await connection.query(
+      `INSERT INTO supervisor
+        (research_expertise, sv_capacity, current_capacity, supervisor_id)
+       VALUES (?, ?, 0, ?)
+       ON DUPLICATE KEY UPDATE
+        research_expertise = VALUES(research_expertise),
+        sv_capacity = VALUES(sv_capacity)`,
+      [expertiseText, capacity, userId]
+    );
+    await connection.query(
+      `INSERT INTO examiners (industry_background, examiners_id)
+       VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE industry_background = VALUES(industry_background)`,
+      [String(affiliation || expertiseText || "UTM Academic Staff").trim(), userId]
+    );
+    return ["Supervisor", "Examiner"];
+  }
+
+  return ["External"];
+}
+
+// POST /api/signup - backend-authoritative registration and role assignment
 router.post("/signup", async (req, res) => {
   const {
     email,
@@ -45,11 +108,18 @@ router.post("/signup", async (req, res) => {
   }
 
   const normalizedEmail = String(email).trim().toLowerCase();
-  const isStudentEmail = normalizedEmail.endsWith("@graduate.utm.my");
-  const isStaffEmail = normalizedEmail.endsWith("@utm.my") && !isStudentEmail;
+  const normalizedPhone = String(phoneNumber).replace(/\s+/g, "").trim();
+  const accountType = detectAccountType(normalizedEmail);
 
-  if (isStudentEmail) {
-    if (!metricNumber || cgpa === null || cgpa === undefined || !totalCreditHour || !creditHourProofName) {
+  if (!/^\d+$/.test(normalizedPhone)) {
+    return res.status(400).json({
+      error: "Invalid phone number",
+      details: "Phone number must contain digits only.",
+    });
+  }
+
+  if (accountType === "student") {
+    if (!metricNumber || cgpa === null || cgpa === undefined || totalCreditHour === null || totalCreditHour === undefined || !creditHourProofName) {
       return res.status(400).json({
         error: "Missing student details",
         details: "Student signup requires metric number, CGPA, completed credit hours, and proof of credit hours.",
@@ -57,7 +127,7 @@ router.post("/signup", async (req, res) => {
     }
   }
 
-  if (isStaffEmail && !expertise) {
+  if (accountType === "staff" && !expertise) {
     return res.status(400).json({
       error: "Missing staff expertise",
       details: "UTM staff signup requires at least one expertise area.",
@@ -67,76 +137,65 @@ router.post("/signup", async (req, res) => {
   const connection = await db.promise().getConnection();
 
   try {
+    const [duplicates] = await connection.query(
+      `SELECT email, phone_number FROM users
+       WHERE LOWER(email) = ? OR phone_number = ? LIMIT 1`,
+      [normalizedEmail, normalizedPhone]
+    );
+    if (duplicates.length) {
+      const sameEmail = String(duplicates[0].email || "").toLowerCase() === normalizedEmail;
+      return res.status(409).json({
+        error: sameEmail ? "Email already registered" : "Phone number already registered",
+      });
+    }
+
     const pepper = process.env.SECRET_PEPPER || "";
     const hashedPassword = await bcrypt.hash(password + pepper, 10);
 
     await connection.beginTransaction();
 
-    await connection.query("CALL sp_signup_normal_user(?, ?, ?, ?, ?, ?, ?)", [
-      normalizedEmail,
-      hashedPassword,
-      fullName,
-      phoneNumber,
-      companyName || null,
-      expertise || null,
-      affiliation || null,
-    ]);
-
-    const [userRows] = await connection.query(
-      "SELECT user_id, email, full_name FROM users WHERE email = ? LIMIT 1",
-      [normalizedEmail]
+    const [userResult] = await connection.query(
+      `INSERT INTO users
+        (email, password_hash, full_name, phone_number, date_created, last_date_login,
+         is_utm_staff, co_org_name, expertise, affiliation)
+       VALUES (?, ?, ?, ?, CURDATE(), CURDATE(), ?, ?, ?, ?)`,
+      [
+        normalizedEmail,
+        hashedPassword,
+        String(fullName).trim(),
+        normalizedPhone,
+        accountType === "staff" ? 1 : 0,
+        accountType === "external" ? companyName || null : null,
+        expertise || null,
+        affiliation || null,
+      ]
     );
 
-    if (!userRows || userRows.length === 0) {
-      throw new Error("User was created but could not be found for role assignment.");
-    }
-
-    const createdUser = userRows[0];
-
-    if (isStudentEmail) {
-      await connection.query(
-        `INSERT INTO students
-          (student_id, metric_number, CGPA, proof_of_credit_hours, credit_hours_completed)
-         VALUES (?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE
-          metric_number = VALUES(metric_number),
-          CGPA = VALUES(CGPA),
-          proof_of_credit_hours = VALUES(proof_of_credit_hours),
-          credit_hours_completed = VALUES(credit_hours_completed)`,
-        [
-          createdUser.user_id,
-          String(metricNumber).trim().toUpperCase(),
-          Number(cgpa),
-          creditHourProofName || "Proof uploaded during signup",
-          Number(totalCreditHour),
-        ]
-      );
-    }
-
-    if (isStaffEmail) {
-      const capacity = Number(workloadCapacity || 5);
-
-      await connection.query(
-        `INSERT INTO supervisor
-          (research_expertise, sv_capacity, current_capacity, supervisor_id)
-         VALUES (?, ?, 0, ?)
-         ON DUPLICATE KEY UPDATE
-          research_expertise = VALUES(research_expertise),
-          sv_capacity = VALUES(sv_capacity)`,
-        [expertise || "General academic supervision", capacity, createdUser.user_id]
-      );
-    }
+    const roles = await assignDetectedRoles(connection, {
+      userId: userResult.insertId,
+      accountType,
+      metricNumber,
+      cgpa,
+      totalCreditHour,
+      creditHourProofName,
+      expertise,
+      workloadCapacity,
+      affiliation,
+    });
 
     await connection.commit();
 
-    res.json({
-      message: isStudentEmail
-        ? "Student account registered successfully."
-        : isStaffEmail
-          ? "UTM staff/supervisor account registered successfully."
-          : "External user registered successfully.",
-      user_id: createdUser.user_id,
-      role: isStudentEmail ? "Student" : isStaffEmail ? "Supervisor" : "External",
+    return res.status(201).json({
+      message:
+        accountType === "student"
+          ? "Student account registered successfully."
+          : accountType === "staff"
+            ? "UTM staff account registered with Supervisor and Examiner capabilities."
+            : "External user registered successfully.",
+      user_id: userResult.insertId,
+      accountType,
+      roles,
+      role: roles.join(", "),
     });
   } catch (error) {
     await connection.rollback();
@@ -149,6 +208,55 @@ router.post("/signup", async (req, res) => {
     connection.release();
   }
 });
+
+async function repairOfficialEmailRole(user) {
+  const accountType = detectAccountType(user.email);
+  if (accountType === "external") return { repaired: false, accountType };
+
+  const connection = await db.promise().getConnection();
+  try {
+    await connection.beginTransaction();
+    if (accountType === "staff") {
+      const expertiseText = String(user.expertise || "General academic supervision").trim();
+      await connection.query("UPDATE users SET is_utm_staff = 1 WHERE user_id = ?", [user.user_id]);
+      await connection.query(
+        `INSERT INTO supervisor (research_expertise, sv_capacity, current_capacity, supervisor_id)
+         VALUES (?, 5, 0, ?)
+         ON DUPLICATE KEY UPDATE research_expertise = COALESCE(NULLIF(research_expertise, ''), VALUES(research_expertise))`,
+        [expertiseText, user.user_id]
+      );
+      await connection.query(
+        `INSERT INTO examiners (industry_background, examiners_id)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE industry_background = COALESCE(NULLIF(industry_background, ''), VALUES(industry_background))`,
+        [String(user.affiliation || expertiseText || "UTM Academic Staff"), user.user_id]
+      );
+    } else {
+      const [existing] = await connection.query(
+        "SELECT student_id FROM students WHERE student_id = ? LIMIT 1",
+        [user.user_id]
+      );
+      if (!existing.length) {
+        const placeholderMetric = `PENDING${user.user_id}`.slice(0, 20);
+        await connection.query(
+          `INSERT INTO students
+            (student_id, metric_number, CGPA, proof_of_credit_hours, credit_hours_completed)
+           VALUES (?, ?, 0, 'Student profile completion required', 0)`,
+          [user.user_id, placeholderMetric]
+        );
+      }
+      await connection.query("UPDATE users SET is_utm_staff = 0 WHERE user_id = ?", [user.user_id]);
+    }
+    await connection.commit();
+    return { repaired: true, accountType };
+  } catch (error) {
+    await connection.rollback();
+    console.warn("Official email role repair skipped:", error.message);
+    return { repaired: false, accountType, error: error.message };
+  } finally {
+    connection.release();
+  }
+}
 
 // POST /api/login - authenticate user login, verify password, and return JWT token with roles
 router.post("/login", (req, res) => {
@@ -188,6 +296,8 @@ router.post("/login", (req, res) => {
       }
 
       delete user.password_hash;
+
+      const roleRepair = await repairOfficialEmailRole(user);
 
       const roleSql = `
         SELECT
@@ -232,12 +342,15 @@ router.post("/login", (req, res) => {
               email: user.email,
               is_admin: user.is_admin,
               is_coordinator: user.is_coordinator,
+              is_student: user.is_student,
+              is_supervisor: user.is_supervisor,
+              is_examiner: user.is_examiner,
             },
             JWT_SECRET,
             { expiresIn: "24h" }
           );
 
-          res.json({ message: "Login successful", user, token });
+          res.json({ message: "Login successful", user, token, roleRepair });
         }
       );
     } catch (compareError) {

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppHeader from '@/components/AppHeader.vue'
+import { openSupervisorProject } from '@/utils/supervisorProjectNavigation'
 import {
   Bell,
   BookOpenCheck,
@@ -64,7 +65,13 @@ const cards = computed(() => [
 const pendingProjects = computed(() =>
   projects.value.filter((project) => {
     const status = String(project.status || '').toLowerCase()
-    return status.includes('pending supervisor approval') || status.includes('assigned') || status.includes('pending review')
+    return (
+      status.includes('pending supervisor approval') ||
+      status.includes('assigned') ||
+      status.includes('pending review') ||
+      status.includes('revision required') ||
+      status.includes('revised proposal submitted')
+    )
   })
 )
 
@@ -120,11 +127,7 @@ async function loadDashboard() {
 
 function reviewTask(task) {
   if (task.type !== 'project') return
-
-  router.push({
-    path: '/supervisor-review',
-    query: { projectId: task.project.project_id },
-  })
+  openSupervisorProject(router, task.project)
 }
 
 onMounted(loadDashboard)

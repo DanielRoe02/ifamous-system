@@ -52,7 +52,7 @@ const isOutsider = computed(() => emailDomain.value === 'outsider')
 
 const roleLabel = computed(() => {
   if (isStudent.value) return 'Student account detected from @graduate.utm.my email'
-  if (isUtmStaff.value) return 'UTM staff account detected from @utm.my email'
+  if (isUtmStaff.value) return 'UTM staff detected: Supervisor and Examiner capabilities will be created'
   return 'External user account detected'
 })
 
@@ -267,7 +267,7 @@ const submitRegistration = async () => {
               <div class="rounded-xl border border-[#f8be17]/40 bg-[#fff8dc] px-4 py-3 text-sm text-[#5c001f]">
                 <p class="font-bold">Automatic role detection</p>
                 <p class="text-xs mt-1 text-[#5c001f]/80">
-                  Student: <b>@graduate.utm.my</b> · Staff/Supervisor: <b>@utm.my</b> · External: other email
+                  Student: <b>@graduate.utm.my</b> · Staff: <b>@utm.my</b> (Supervisor + Examiner) · External: other email
                 </p>
               </div>
 
@@ -276,7 +276,8 @@ const submitRegistration = async () => {
                 <input
                   v-model="formData.fullName"
                   type="text"
-                  placeholder="Ahmad Daniel Tamingsari Bin Ramlan"
+                  placeholder="Enter your full name"
+                  autocomplete="name"
                   class="px-4 py-3 rounded-lg border border-[#d9d9d9] focus:ring-1 focus:ring-[#5c001f] focus:border-[#5c001f] outline-none w-full text-sm text-gray-900 placeholder:text-gray-500"
                 />
                 <span v-if="errors.fullName" class="text-red-500 text-xs">{{ errors.fullName }}</span>
@@ -285,12 +286,15 @@ const submitRegistration = async () => {
               <div class="flex flex-col gap-1">
                 <label class="text-sm font-medium text-[#0d0b26]">Email</label>
                 <span class="text-xs text-gray-500 mb-1 leading-tight">
-                  Students use @graduate.utm.my. Staff use @utm.my.
+                  Students use @graduate.utm.my. UTM staff use @utm.my and receive both Supervisor and Examiner capabilities.
                 </span>
                 <input
                   v-model="formData.email"
                   type="email"
-                  placeholder="ahmad.daniel@graduate.utm.my"
+                  autocomplete="email"
+                  autocapitalize="none"
+                  spellcheck="false"
+                  placeholder="student@graduate.utm.my"
                   class="px-4 py-3 rounded-lg border border-[#d9d9d9] focus:ring-1 focus:ring-[#5c001f] focus:border-[#5c001f] outline-none w-full text-sm text-gray-900 placeholder:text-gray-500"
                 />
                 <span v-if="errors.email" class="text-red-500 text-xs">{{ errors.email }}</span>
@@ -308,7 +312,10 @@ const submitRegistration = async () => {
                 <span class="text-xs text-gray-500 mb-1 leading-tight">Must be accessible through WhatsApp. No spacing.</span>
                 <input
                   v-model="formData.phoneNumber"
-                  type="text"
+                  type="tel"
+                  autocomplete="tel"
+                  inputmode="numeric"
+                  pattern="[0-9]*"
                   placeholder="0123456789"
                   class="px-4 py-3 rounded-lg border border-[#d9d9d9] focus:ring-1 focus:ring-[#5c001f] focus:border-[#5c001f] outline-none w-full text-sm text-gray-900 placeholder:text-gray-500"
                 />
@@ -321,6 +328,7 @@ const submitRegistration = async () => {
                   <input
                     v-model="formData.password"
                     :type="showPassword ? 'text' : 'password'"
+                    autocomplete="new-password"
                     placeholder="******"
                     class="px-4 py-3 rounded-lg border border-[#d9d9d9] focus:ring-1 focus:ring-[#5c001f] focus:border-[#5c001f] outline-none w-full pr-10 text-sm text-gray-900 placeholder:text-gray-500"
                   />
@@ -341,6 +349,7 @@ const submitRegistration = async () => {
                   <input
                     v-model="formData.confirmPassword"
                     :type="showConfirmPassword ? 'text' : 'password'"
+                    autocomplete="new-password"
                     placeholder="******"
                     class="px-4 py-3 rounded-lg border border-[#d9d9d9] focus:ring-1 focus:ring-[#5c001f] focus:border-[#5c001f] outline-none w-full pr-10 text-sm text-gray-900 placeholder:text-gray-500"
                   />

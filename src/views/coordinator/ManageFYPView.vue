@@ -4,10 +4,10 @@ import { useRoute, useRouter } from 'vue-router'
 import AppHeader from '@/components/AppHeader.vue'
 import AppSidebar from '@/components/AppSidebar.vue'
 import AppFooter from '@/components/AppFooter.vue'
+import EmailNotificationToggle from '@/components/EmailNotificationToggle.vue'
 import {
   UploadCloud,
   FileText,
-  BrainCircuit,
   Users,
   AlertTriangle,
   ArrowRight,
@@ -55,6 +55,7 @@ const selectedFileName = ref('')
 const showAssignModal = ref(false)
 const pendingSupervisor = ref(null)
 const lastAssignment = ref(null)
+const sendAssignmentEmail = ref(true)
 
 const proposalForm = ref({
   members: [],
@@ -107,6 +108,13 @@ const loadSubmittedProposalQueue = async () => {
   } finally {
     isLoadingQueue.value = false
   }
+}
+
+const openCoordinatorProjectDetails = (project) => {
+  router.push({
+    path: '/coordinator-project-details',
+    query: { projectId: project.project_id },
+  })
 }
 
 const openSubmittedProposal = (project) => {
@@ -238,11 +246,11 @@ const fillSampleProposal = () => {
     members: [
       { name: 'Shaikh Amir Husaini Bin Sh.Mohd Saifuddeen', matricNo: 'A24MJ5068' },
       { name: 'Ahmad Fadzril Bin Ahmad Badril', matricNo: 'A24MJ5050' },
-      { name: 'Ahmad Daniel Tamingsari Bin Ramlan', matricNo: 'A24MJ5074' },
+      { name: 'Sample Student Three', matricNo: 'A24XX0003' },
       { name: 'Adlan Hazim Bin Abdul Rahman', matricNo: 'A24MJ5056' },
     ],
     memberText:
-      '1. Shaikh Amir Husaini Bin Sh.Mohd Saifuddeen (A24MJ5068)\n2. Ahmad Fadzril Bin Ahmad Badril (A24MJ5050)\n3. Ahmad Daniel Tamingsari Bin Ramlan (A24MJ5074)\n4. Adlan Hazim Bin Abdul Rahman (A24MJ5056)',
+      '1. Shaikh Amir Husaini Bin Sh.Mohd Saifuddeen (A24MJ5068)\n2. Ahmad Fadzril Bin Ahmad Badril (A24MJ5050)\n3. Sample Student Three (A24XX0003)\n4. Adlan Hazim Bin Abdul Rahman (A24MJ5056)',
     studentName: 'Shaikh Amir Husaini Bin Sh.Mohd Saifuddeen',
     matricNo: 'A24MJ5068',
     projectTitle: 'Software Engineering Smart Academic Advisor (AA) Audit System',
@@ -333,6 +341,7 @@ const viewSupervisorProfile = (supervisor) => {
 }
 
 const openAssignConfirmation = (supervisor) => {
+  sendAssignmentEmail.value = true
   pendingSupervisor.value = supervisor
   assignError.value = ''
   showAssignModal.value = true
@@ -361,6 +370,7 @@ const confirmAssignment = async () => {
         projectId: selectedQueueProjectId.value,
         project: proposalForm.value,
         supervisor: pendingSupervisor.value,
+        sendEmail: sendAssignmentEmail.value,
       }),
     })
 
@@ -488,7 +498,7 @@ onMounted(async () => {
 
           <div class="bg-white rounded-[26px] p-6 shadow-lg border border-black/10">
             <div class="w-14 h-14 rounded-2xl bg-[#5c001f] p-3 flex items-center justify-center">
-              <BrainCircuit class="w-7 h-7 text-[#f8be17]" />
+              <Sparkles class="w-7 h-7 text-[#f8be17]" />
             </div>
             <p class="text-gray-500 font-semibold mt-5">Step 2</p>
             <h3 class="text-xl font-bold text-black mt-1">AI Matching</h3>
@@ -547,7 +557,7 @@ onMounted(async () => {
                     : 'bg-white text-[#5c001f] hover:bg-[#fff8df]',
                 ]"
               >
-                <BrainCircuit class="w-5 h-5" />
+                <Sparkles class="w-5 h-5" />
                 AI Matching Result
               </button>
 
@@ -691,12 +701,24 @@ onMounted(async () => {
                   </td>
 
                   <td class="px-5 py-4">
-                    <button
-                      @click="openSubmittedProposal(project)"
-                      class="bg-[#5c001f] text-white px-4 py-2 rounded-full font-bold hover:bg-[#4a0019]"
-                    >
-                      Review / Run AI
-                    </button>
+                    <div class="flex items-center justify-end gap-2">
+                      <button
+                        @click="openCoordinatorProjectDetails(project)"
+                        class="w-10 h-10 rounded-full border border-[#5c001f] text-[#5c001f] hover:bg-[#fff3c4] inline-flex items-center justify-center"
+                        title="Review project details and documents"
+                        aria-label="Review project details"
+                      >
+                        <Eye class="w-5 h-5" />
+                      </button>
+                      <button
+                        @click="openSubmittedProposal(project)"
+                        class="w-10 h-10 rounded-full bg-[#5c001f] text-white hover:bg-[#4a0019] inline-flex items-center justify-center"
+                        title="Run AI supervisor matching"
+                        aria-label="Run AI supervisor matching"
+                      >
+                        <Sparkles class="w-5 h-5 text-[#f8be17]" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
 </tbody>
@@ -717,7 +739,7 @@ onMounted(async () => {
               <div class="2xl:col-span-1">
                 <div class="rounded-[26px] bg-[#5c001f] text-white p-7 shadow-lg">
                   <div class="w-16 h-16 rounded-2xl bg-[#f8be17] flex items-center justify-center">
-                    <BrainCircuit class="w-9 h-9 text-[#5c001f]" />
+                    <Sparkles class="w-9 h-9 text-[#5c001f]" />
                   </div>
 
                   <h2 class="text-[28px] font-bold mt-5">AI Matching Summary</h2>
@@ -771,7 +793,7 @@ onMounted(async () => {
                         @click="runAIMatch"
                         class="bg-[#fff3c4] text-[#5c001f] px-5 py-2.5 rounded-full font-bold hover:bg-[#f8be17] transition-colors inline-flex items-center gap-2"
                       >
-                        <BrainCircuit class="w-4 h-4" />
+                        <Sparkles class="w-4 h-4" />
                         Run Again
                       </button>
                     </div>
@@ -809,7 +831,7 @@ onMounted(async () => {
                     v-if="recommendedSupervisors.length === 0"
                     class="rounded-[24px] border border-[#e1d5cc] bg-[#f7f1ea] p-8 text-center"
                   >
-                    <BrainCircuit class="w-12 h-12 mx-auto text-[#5c001f]" />
+                    <Sparkles class="w-12 h-12 mx-auto text-[#5c001f]" />
                     <h3 class="text-xl font-bold mt-4">No AI matching result yet</h3>
                     <p class="text-gray-600 mt-2">
                       Open a submitted proposal from the queue, then click Run AI Matching to generate supervisor recommendations.
@@ -819,7 +841,7 @@ onMounted(async () => {
                       @click="runAIMatch"
                       class="mt-6 bg-[#5c001f] text-white px-6 py-3 rounded-full font-bold hover:bg-[#4a0019] transition-colors inline-flex items-center gap-2"
                     >
-                      <BrainCircuit class="w-5 h-5" />
+                      <Sparkles class="w-5 h-5" />
                       Run AI Matching
                     </button>
                   </div>
@@ -1315,6 +1337,11 @@ onMounted(async () => {
               </div>
             </div>
           </div>
+        </div>
+
+        <div class="mx-7 mb-5 space-y-2">
+          <p class="text-sm text-gray-600"><strong>Recipients:</strong> selected supervisor and project student</p>
+          <EmailNotificationToggle v-model="sendAssignmentEmail" />
         </div>
 
         <div v-if="assignError" class="mx-7 mb-5 rounded-[18px] bg-red-50 border border-red-200 p-4">

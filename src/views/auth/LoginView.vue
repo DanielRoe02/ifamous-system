@@ -48,7 +48,7 @@ const handleLogin = async () => {
       router.push('/admin-dashboard')
     } else if (Number(data.user?.is_coordinator) === 1) {
       router.push('/dashboard')
-    } else if (Number(data.user?.is_supervisor) === 1) {
+    } else if (Number(data.user?.is_supervisor) === 1 || Number(data.user?.is_examiner) === 1) {
       router.push('/supervisor-dashboard')
     } else if (Number(data.user?.is_student) === 1) {
       router.push('/student-dashboard')

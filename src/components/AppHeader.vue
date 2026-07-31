@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuth } from '@/composables/useAuth'
 import imgLogoUtmReversePutih1 from '@/assets/77ef8f9588a3fa002b1d280d8bcea5ad51e2d03d.png'
+import { formatMalaysiaDateTime } from '@/utils/dateTime'
 
 const router = useRouter()
 const { user, logout } = useAuth()
@@ -16,7 +17,7 @@ const isLoadingNotifications = ref(false)
 const notificationError = ref('')
 
 // Build notification roles from the logged-in user.
-// Daniel can be Coordinator + Supervisor, so we combine both.
+// One account may have several staff capabilities, so combine every effective role.
 // Coordinator notifications are shown generally.
 // Supervisor notifications are shown only when recipient_email matches user.email.
 const currentUser = computed(() => {
@@ -75,11 +76,11 @@ const dashboardPath = computed(() => {
     return '/admin-dashboard'
   }
 
-  if (roles.includes('Student') && !roles.includes('Coordinator') && !roles.includes('Supervisor')) {
+  if (roles.includes('Student') && !roles.includes('Coordinator') && !roles.includes('Supervisor') && !roles.includes('Examiner')) {
     return '/student-dashboard'
   }
 
-  if (roles.includes('Supervisor') && !roles.includes('Coordinator')) {
+  if ((roles.includes('Supervisor') || roles.includes('Examiner')) && !roles.includes('Coordinator')) {
     return '/supervisor-dashboard'
   }
 
@@ -89,8 +90,12 @@ const dashboardPath = computed(() => {
 const roleHomePath = computed(() => {
   const roles = notificationRoles.value
 
-  if (roles.includes('Student') && !roles.includes('Coordinator') && !roles.includes('Supervisor')) {
+  if (roles.includes('Student') && !roles.includes('Coordinator') && !roles.includes('Supervisor') && !roles.includes('Examiner')) {
     return '/student-fyp'
+  }
+
+  if (roles.includes('Examiner') && !roles.includes('Supervisor') && !roles.includes('Coordinator')) {
+    return '/examiner-projects'
   }
 
   if (roles.includes('Supervisor') && !roles.includes('Coordinator')) {
@@ -109,9 +114,10 @@ const getNotificationTarget = (item) => {
   const projectId = item?.project_id || ''
 
   if (type === 'student') {
+    const isResult = /result released|grade released/i.test(String(item?.title || ''))
     return {
       path: '/student-project-details',
-      query: projectId ? { projectId } : {},
+      query: projectId ? { projectId, ...(isResult ? { tab: 'result' } : {}) } : {},
     }
   }
 
@@ -129,13 +135,20 @@ const getNotificationTarget = (item) => {
     }
   }
 
+  if (type === 'examiner') {
+    return {
+      path: '/examiner-review',
+      query: projectId ? { projectId } : {},
+    }
+  }
+
   return { path: roleHomePath.value }
 }
 
 const notificationOpenLabel = computed(() => {
   const roles = notificationRoles.value
 
-  if (roles.includes('Student') && !roles.includes('Coordinator') && !roles.includes('Supervisor')) {
+  if (roles.includes('Student') && !roles.includes('Coordinator') && !roles.includes('Supervisor') && !roles.includes('Examiner')) {
     return 'Open My FYP'
   }
 
@@ -145,19 +158,6 @@ const notificationOpenLabel = computed(() => {
 
   return 'Open Manage FYP'
 })
-
-const formatTime = (dateString) => {
-  if (!dateString) return ''
-
-  const date = new Date(dateString)
-
-  return date.toLocaleString('en-MY', {
-    hour: '2-digit',
-    minute: '2-digit',
-    day: '2-digit',
-    month: 'short',
-  })
-}
 
 const loadNotifications = async () => {
   notificationError.value = ''
@@ -238,6 +238,12 @@ const toggleNotifications = async () => {
 const toggleUserDropdown = () => {
   showDropdown.value = !showDropdown.value
   showNotifications.value = false
+}
+
+const goToProfile = () => {
+  showDropdown.value = false
+  showNotifications.value = false
+  router.push('/profile')
 }
 
 const handleLogout = () => {
@@ -418,7 +424,7 @@ onBeforeUnmount(() => {
                   </div>
 
                   <p class="text-xs text-gray-500 mt-1">
-                    {{ item.recipientType }} · {{ formatTime(item.createdAt) }}
+                    {{ item.recipientType }} · {{ formatMalaysiaDateTime(item.createdAt) }}
                   </p>
 
                   <p class="text-sm text-gray-700 mt-2 leading-relaxed">
@@ -472,8 +478,15 @@ onBeforeUnmount(() => {
           </div>
 
           <button
+            @click="goToProfile"
+            class="block w-full text-left px-4 py-2 text-sm text-[#5c001f] hover:bg-[#f7f1ea] font-semibold"
+          >
+            Edit Profile
+          </button>
+
+          <button
             @click="handleLogout"
-            class="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 font-medium"
+            class="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 font-medium border-t border-gray-100"
           >
             Logout
           </button>

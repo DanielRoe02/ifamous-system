@@ -14,9 +14,13 @@ import {
   Plus,
   RefreshCw,
   Send,
+  Sparkles,
+  Check,
   X,
 } from "lucide-vue-next";
 import AppHeader from "@/components/AppHeader.vue";
+import RoleSidebar from "@/components/RoleSidebar.vue";
+import { formatMalaysiaDate } from "@/utils/dateTime";
 
 const router = useRouter();
 
@@ -29,6 +33,10 @@ const mode = ref("records");
 const loading = ref(false);
 const submitting = ref(false);
 const extracting = ref(false);
+const matchingSupervisors = ref(false);
+const matchError = ref("");
+const supervisorRecommendations = ref([]);
+const selectedNominees = ref([]);
 const errorMessage = ref("");
 const successMessage = ref("");
 const isDragging = ref(false);
@@ -47,10 +55,21 @@ const form = ref({
 const activeStatuses = [
   "Draft",
   "Pending Review",
+  "Pending Coordinator Review",
   "Pending AI Matching",
   "Pending Supervisor Assignment",
   "Pending Supervisor Approval",
+  "Revision Required",
+  "Revised Proposal Submitted",
   "Active",
+  "Development in Progress",
+  "Final Deliverables Submitted",
+  "Final Correction Required",
+  "Awaiting Examiner Assignment",
+  "Examiner Assigned",
+  "Under Examination",
+  "Grading Completed",
+  "Result Pending Release",
 ];
 
 const canCreateFyp = computed(() => {
@@ -70,22 +89,6 @@ function getAuthToken() {
   );
 }
 
-function formatDate(value) {
-  if (!value) return "-";
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "-";
-  }
-
-  return date.toLocaleDateString("en-MY", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
-
 function normalizeRecord(record) {
   return {
     id: record.id || record.project_id,
@@ -99,7 +102,7 @@ function normalizeRecord(record) {
     supervisorEmail: record.supervisorEmail || record.supervisor_email || "",
     examiner: record.examiner || record.examiner_name || "Not Assigned",
     examinerEmail: record.examinerEmail || record.examiner_email || "",
-    lastUpdated: formatDate(record.lastUpdated || record.updated_at || record.created_at),
+    lastUpdated: formatMalaysiaDate(record.lastUpdated || record.updated_at || record.created_at),
   };
 }
 
@@ -143,6 +146,9 @@ function startCreateFlow() {
   };
 
   selectedFile.value = null;
+  supervisorRecommendations.value = [];
+  selectedNominees.value = [];
+  matchError.value = "";
   errorMessage.value = "";
   successMessage.value = "";
   mode.value = "upload";
@@ -209,6 +215,72 @@ function removeFile() {
   }
 }
 
+function isNomineeSelected(candidate) {
+  return selectedNominees.value.some((item) => Number(item.user_id) === Number(candidate.user_id));
+}
+
+function toggleNominee(candidate) {
+  const index = selectedNominees.value.findIndex((item) => Number(item.user_id) === Number(candidate.user_id));
+  if (index >= 0) {
+    selectedNominees.value.splice(index, 1);
+    return;
+  }
+  if (selectedNominees.value.length >= 3) {
+    matchError.value = "You can nominate up to three preferred supervisors.";
+    return;
+  }
+  selectedNominees.value.push(candidate);
+  matchError.value = "";
+}
+
+function moveNominee(index, direction) {
+  const target = index + direction;
+  if (target < 0 || target >= selectedNominees.value.length) return;
+  const next = [...selectedNominees.value];
+  [next[index], next[target]] = [next[target], next[index]];
+  selectedNominees.value = next;
+}
+
+function nomineeRank(candidate) {
+  const index = selectedNominees.value.findIndex(
+    (item) => Number(item.user_id) === Number(candidate.user_id)
+  );
+  return index >= 0 ? index + 1 : null;
+}
+
+async function runSupervisorMatch() {
+  matchingSupervisors.value = true;
+  matchError.value = "";
+  try {
+    const response = await fetch(`${API_BASE}/api/supervisor-matching/match`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${getAuthToken()}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        projectTitle: form.value.projectTitle,
+        projectType: form.value.projectType,
+        abstract: form.value.abstract,
+        keywords: form.value.keywords,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || "Failed to find suitable supervisors.");
+    }
+    supervisorRecommendations.value = data.recommendations || [];
+    selectedNominees.value = selectedNominees.value.filter((selected) =>
+      supervisorRecommendations.value.some((item) => Number(item.user_id) === Number(selected.user_id))
+    );
+  } catch (error) {
+    matchError.value = error.message || "AI supervisor matching failed.";
+    supervisorRecommendations.value = [];
+  } finally {
+    matchingSupervisors.value = false;
+  }
+}
+
 async function goToReview() {
   if (!selectedFile.value) {
     errorMessage.value = "Please upload your proposal document first.";
@@ -244,6 +316,7 @@ async function goToReview() {
     form.value.keywords = extracted.keywords || "";
 
     mode.value = "review";
+    await runSupervisorMatch();
   } catch (error) {
     errorMessage.value = error.message;
   } finally {
@@ -264,6 +337,14 @@ async function submitFypToDatabase() {
     submitData.append("projectType", form.value.projectType);
     submitData.append("abstract", form.value.abstract);
     submitData.append("keywords", form.value.keywords || "");
+    submitData.append(
+      "supervisorNominations",
+      JSON.stringify(selectedNominees.value.map((item, index) => ({
+        supervisorUserId: item.user_id,
+        preferenceRank: index + 1,
+        note: `AI match ${item.score || 0}%: ${item.reason || "Student preference"}`,
+      })))
+    );
 
     if (selectedFile.value) {
       submitData.append("proposal", selectedFile.value);
@@ -333,39 +414,7 @@ onMounted(loadMyFyp);
     <AppHeader />
 
     <div class="flex">
-      <aside class="w-[240px] bg-[#f7f1ea] border-r border-[#d8c9bd] min-h-[calc(100vh-70px)] p-4">
-        <div class="bg-white/80 border border-[#e1d5cc] rounded-[18px] p-4 mb-4">
-          <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#5c001f]">
-            Student
-          </p>
-          <p class="text-sm text-gray-600 mt-1">FYP Workspace</p>
-        </div>
-
-        <nav class="space-y-2">
-          <button
-            @click="router.push('/student-dashboard')"
-            class="w-full hover:bg-white text-[#2b1b1b] rounded-[14px] px-4 py-3 flex items-center gap-3 font-bold"
-          >
-            <LayoutDashboard class="w-5 h-5 text-[#5c001f]" />
-            Dashboard
-          </button>
-
-          <button
-            class="w-full bg-[#5c001f] text-white rounded-[14px] px-4 py-3 flex items-center gap-3 font-bold"
-          >
-            <FolderKanban class="w-5 h-5 text-[#f8be17]" />
-            My FYP
-          </button>
-
-          <button
-            @click="router.push('/student-logbook')"
-            class="w-full hover:bg-white text-[#2b1b1b] rounded-[14px] px-4 py-3 flex items-center gap-3 font-bold"
-          >
-            <BookOpenCheck class="w-5 h-5 text-[#5c001f]" />
-            Logbook
-          </button>
-        </nav>
-      </aside>
+      <RoleSidebar role="Student" />
 
       <main class="flex-1 p-8 space-y-7">
         <section class="rounded-[32px] bg-[#5c001f] text-white p-8 shadow-xl relative overflow-hidden">
@@ -663,6 +712,72 @@ onMounted(loadMyFyp);
                 Keywords
               </p>
               <p class="mt-2 text-gray-700">{{ form.keywords || "-" }}</p>
+            </div>
+
+            <div class="rounded-[22px] border border-[#e1d5cc] bg-[#f7f1ea] p-5">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p class="text-xs uppercase tracking-[0.18em] font-bold text-[#5c001f]">AI-assisted supervisor nomination</p>
+                  <h3 class="text-xl font-bold mt-1">Choose up to three preferences</h3>
+                  <p class="text-sm text-gray-600 mt-1">The AI can show up to ten eligible candidates. You may choose and rank a maximum of three preferences; the coordinator makes the final assignment.</p>
+                </div>
+                <button
+                  @click="runSupervisorMatch"
+                  :disabled="matchingSupervisors"
+                  class="rounded-full bg-[#5c001f] px-5 py-2.5 font-bold text-white inline-flex items-center gap-2 disabled:opacity-60"
+                >
+                  <Loader2 v-if="matchingSupervisors" class="w-4 h-4 animate-spin" />
+                  <Sparkles v-else class="w-4 h-4 text-[#f8be17]" />
+                  {{ matchingSupervisors ? "Matching..." : "Run AI Matching" }}
+                </button>
+              </div>
+
+              <p v-if="matchError" class="mt-4 rounded-xl bg-red-50 border border-red-200 p-3 text-sm font-bold text-red-700">{{ matchError }}</p>
+
+              <div v-if="supervisorRecommendations.length" class="mt-5">
+                <p class="text-sm text-gray-600 mb-3">
+                  Showing {{ supervisorRecommendations.length }} eligible candidate{{ supervisorRecommendations.length === 1 ? '' : 's' }}.
+                  <span v-if="supervisorRecommendations.length < 4">Only this number of eligible supervisors is currently available.</span>
+                </p>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <button
+                  v-for="candidate in supervisorRecommendations"
+                  :key="candidate.user_id"
+                  type="button"
+                  @click="toggleNominee(candidate)"
+                  class="text-left rounded-[18px] border p-4 transition-all"
+                  :class="isNomineeSelected(candidate) ? 'border-[#5c001f] bg-[#fff3c4] ring-2 ring-[#f8be17]' : 'border-[#d8c9bd] bg-white hover:border-[#5c001f]'"
+                >
+                  <div class="flex items-start justify-between gap-3">
+                    <div>
+                      <p class="font-bold">{{ candidate.name }}</p>
+                      <p class="text-xs text-gray-500 mt-1">{{ candidate.faculty || candidate.department || 'Supervisor' }}</p>
+                    </div>
+                    <div class="min-w-8 h-8 px-2 rounded-full flex items-center justify-center font-bold" :class="isNomineeSelected(candidate) ? 'bg-[#5c001f] text-white' : 'bg-[#f7f1ea] text-gray-400'">
+                      <span v-if="nomineeRank(candidate)">#{{ nomineeRank(candidate) }}</span>
+                      <Check v-else class="w-4 h-4" />
+                    </div>
+                  </div>
+                  <p class="text-sm mt-3"><strong>{{ candidate.score }}% match</strong> · Workload {{ candidate.workload || `${candidate.currentCapacity || 0} / ${candidate.capacity || 5}` }}</p>
+                  <p class="text-sm text-gray-600 mt-2 line-clamp-3">{{ candidate.expertise }}</p>
+                  <p class="text-xs text-gray-500 mt-3">{{ candidate.reason }}</p>
+                </button>
+                </div>
+              </div>
+
+              <div v-if="selectedNominees.length" class="mt-5 rounded-[16px] bg-white border border-[#e1d5cc] p-4">
+                <p class="font-bold text-[#5c001f]">Your ranked nominations</p>
+                <div class="mt-3 space-y-2">
+                  <div v-for="(candidate, index) in selectedNominees" :key="candidate.user_id" class="rounded-[14px] bg-[#f7f1ea] border border-[#e1d5cc] px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                    <p class="font-bold">#{{ index + 1 }} {{ candidate.name }}</p>
+                    <div class="flex gap-2">
+                      <button type="button" @click="moveNominee(index, -1)" :disabled="index === 0" class="rounded-lg border px-3 py-1.5 font-bold disabled:opacity-30" title="Move preference up">↑</button>
+                      <button type="button" @click="moveNominee(index, 1)" :disabled="index === selectedNominees.length - 1" class="rounded-lg border px-3 py-1.5 font-bold disabled:opacity-30" title="Move preference down">↓</button>
+                      <button type="button" @click="toggleNominee(candidate)" class="rounded-lg bg-red-50 border border-red-200 text-red-700 px-3 py-1.5 font-bold" title="Remove nomination">Remove</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 

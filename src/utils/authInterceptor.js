@@ -7,7 +7,7 @@ let isHandlingExpiration = false;
  * clearing auth storage, and redirecting to the login page.
  */
 export function handleSessionExpired(router, message = "Session expired. Please log in again.") {
-  console.warn("[AUTH ALERT] Session expired. Token validation failed or 2-hour valid time window elapsed.");
+  console.warn("[AUTH ALERT] Session expired. Token validation failed or the configured login session expired.");
   console.error("SESSION_EXPIRED: Invalid or expired JWT token detected.");
 
   if (isHandlingExpiration) return;
@@ -42,7 +42,26 @@ export function handleSessionExpired(router, message = "Session expired. Please 
  * @param {object} router - Vue router instance
  */
 export function setupAuthInterceptor(router) {
-  // 1. Axios Interceptor
+  // 1. Axios Interceptors
+  axios.interceptors.request.use((config) => {
+    let session = {};
+    try {
+      session = JSON.parse(localStorage.getItem("userSession") || "null") || {};
+    } catch (_) {
+      session = {};
+    }
+    const token =
+      localStorage.getItem("token") ||
+      localStorage.getItem("authToken") ||
+      localStorage.getItem("ifamous_token") ||
+      session.token;
+    if (token && !config.headers?.Authorization) {
+      config.headers = config.headers || {};
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  });
+
   axios.interceptors.response.use(
     (response) => response,
     (error) => {
@@ -67,9 +86,22 @@ export function setupAuthInterceptor(router) {
 
   // 2. Window Fetch Wrapper Interceptor
   const originalFetch = window.fetch;
-  window.fetch = async function (...args) {
+  window.fetch = async function (input, init = {}) {
     try {
-      const response = await originalFetch.apply(this, args);
+      let session = {};
+      try {
+        session = JSON.parse(localStorage.getItem("userSession") || "null") || {};
+      } catch (_) {
+        session = {};
+      }
+      const token =
+        localStorage.getItem("token") ||
+        localStorage.getItem("authToken") ||
+        localStorage.getItem("ifamous_token") ||
+        session.token;
+      const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
+      if (token && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
+      const response = await originalFetch.call(this, input, { ...init, headers });
       if (response.status === 401) {
         const clone = response.clone();
         try {
